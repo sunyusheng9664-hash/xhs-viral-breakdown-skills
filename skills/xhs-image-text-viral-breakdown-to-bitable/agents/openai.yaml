@@ -1,0 +1,8 @@
+interface:
+  display_name: "小红书图文入库"
+  short_description: "拆解小红书图文笔记并写入固定飞书库"
+  brand_color: "#D33F49"
+  default_prompt: "Use $xhs-image-text-viral-breakdown-to-bitable to拆解这些小红书图文笔记并写入我的固定飞书图文库。"
+policy:
+  allow_implicit_invocation: true
+

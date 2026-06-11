@@ -1,0 +1,8 @@
+interface:
+  display_name: "小红书视频入库"
+  short_description: "拆解小红书视频笔记并写入固定飞书库"
+  brand_color: "#C02942"
+  default_prompt: "Use $xhs-video-viral-breakdown-to-bitable to拆解这些小红书视频笔记并写入我的固定飞书视频库。"
+policy:
+  allow_implicit_invocation: true
+
