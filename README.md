@@ -24,7 +24,9 @@ This repository contains two Codex skills for turning public Xiaohongshu notes i
 
 ```text
 # From Codex
-Use $skill-installer to install both skills from sunyusheng9664-hash/xhs-viral-breakdown-skills
+Use $skill-installer to install:
+https://github.com/sunyusheng9664-hash/xhs-viral-breakdown-skills/tree/main/skills/xhs-image-text-viral-breakdown-to-bitable
+https://github.com/sunyusheng9664-hash/xhs-viral-breakdown-skills/tree/main/skills/xhs-video-viral-breakdown-to-bitable
 ```
 
 Or manually:
