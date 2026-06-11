@@ -1,5 +1,9 @@
 # Xiaohongshu Viral Breakdown Skills
 
+The core advantage of these skills is not aggressive Xiaohongshu crawling, but a low-risk public-link workflow. They only process public share links provided by the user. They do not require Xiaohongshu login, cookies, account sessions, likes, saves, comments, search scraping, or bulk page crawling. They simply open the public link and organize the title, body, images, engagement data, subtitles, and other content already returned to the browser.
+
+This keeps the risk much lower: no account access, no private data, no login bypassing, and no high-frequency collection. If a public page exposes the data, the skills organize it; if not, they mark it as unavailable instead of forcing extraction. The product is best understood as public content organization, viral-content analysis, and Feishu Bitable archiving, not a high-risk crawler.
+
 This repository contains two Codex skills for turning public Xiaohongshu notes into persistent Feishu/Lark Bitable content libraries.
 
 ## Skills
