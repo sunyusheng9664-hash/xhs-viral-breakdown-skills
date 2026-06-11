@@ -14,19 +14,16 @@ This repository contains two Codex skills for turning public Xiaohongshu notes i
   - Extracts title, cover, author, engagement metrics, duration, `mediaV2`, and subtitles when available.
   - Produces corrected spoken transcript, viral breakdown, and reusable tactics.
 
-## Install in Codex
+## Installation 安装
 
-Recommended: ask Codex to install both skills from this GitHub repository:
+### Codex
 
 ```text
-Use $skill-installer to install these two skills from sunyusheng9664-hash/xhs-viral-breakdown-skills:
-skills/xhs-image-text-viral-breakdown-to-bitable
-skills/xhs-video-viral-breakdown-to-bitable
+# From Codex
+Use $skill-installer to install both skills from sunyusheng9664-hash/xhs-viral-breakdown-skills
 ```
 
-After installation, restart Codex so it picks up the new skills.
-
-If you want to install manually:
+Or manually:
 
 ```bash
 git clone https://github.com/sunyusheng9664-hash/xhs-viral-breakdown-skills.git
@@ -35,21 +32,7 @@ cp -R xhs-viral-breakdown-skills/skills/xhs-image-text-viral-breakdown-to-bitabl
 cp -R xhs-viral-breakdown-skills/skills/xhs-video-viral-breakdown-to-bitable ~/.codex/skills/
 ```
 
-Then restart Codex.
-
-Verify the files exist:
-
-```bash
-ls ~/.codex/skills/xhs-image-text-viral-breakdown-to-bitable/SKILL.md
-ls ~/.codex/skills/xhs-video-viral-breakdown-to-bitable/SKILL.md
-```
-
-Use the skills by describing the task naturally, or invoke them explicitly:
-
-```text
-Use $xhs-image-text-viral-breakdown-to-bitable to拆解这些小红书图文笔记并写入飞书。
-Use $xhs-video-viral-breakdown-to-bitable to拆解这些小红书视频笔记并写入飞书。
-```
+Restart Codex after installation.
 
 ## First-Run Rule
 
