@@ -1,60 +1,87 @@
-# Xiaohongshu Viral Breakdown Skills
+# 小红书爆款拆解与飞书归档 Skill
 
-The core advantage of these skills is not aggressive Xiaohongshu crawling, but a low-risk public-link workflow. They only process public share links provided by the user. They do not require Xiaohongshu login, cookies, account sessions, likes, saves, comments, search scraping, or bulk page crawling. They simply open the public link and organize the title, body, images, engagement data, subtitles, and other content already returned to the browser.
+把用户主动提供的公开小红书图文或视频链接转换成结构化内容资产，生成 Excel 备份，并分别写入长期使用的飞书多维表格。
 
-This keeps the risk much lower: no account access, no private data, no login bypassing, and no high-frequency collection. If a public page exposes the data, the skills organize it; if not, they mark it as unavailable instead of forcing extraction. The product is best understood as public content organization, viral-content analysis, and Feishu Bitable archiving, not a high-risk crawler.
+## 支持范围
 
-This repository contains two Codex skills for turning public Xiaohongshu notes into persistent Feishu/Lark Bitable content libraries.
+- 统一 Skill：`skills/xhs-viral-breakdown-to-bitable`
+- 已验证平台：Codex（macOS）
+- 已生成待验收包：TRAE IDE、WorkBuddy 桌面端
+- 运行要求：Node.js 18+、可访问公开小红书链接、已授权的飞书官方 CLI
+- 不处理：登录后私密内容、批量平台搜索、绕过访问限制、自动发布或互动
 
-## Skills
+仓库仍保留原图文和视频两个 Codex Skill 作为兼容入口。新用户应安装统一 Skill。
 
-- `skills/xhs-image-text-viral-breakdown-to-bitable`
-  - Processes Xiaohongshu image-text notes.
-  - Extracts title, summary, topics, cover, image URLs, engagement metrics.
-  - Produces cover analysis, interaction drivers, viral reasons, and reusable tactics.
+## 安装
 
-- `skills/xhs-video-viral-breakdown-to-bitable`
-  - Processes Xiaohongshu video notes.
-  - Extracts title, cover, author, engagement metrics, duration, `mediaV2`, and subtitles when available.
-  - Produces corrected spoken transcript, viral breakdown, and reusable tactics.
+运行发布脚本后，在 `dist/` 获取三个不含凭证的安装包：
 
-## Installation 安装
+```text
+node scripts/package-release.mjs
+```
 
 ### Codex
 
-```text
-# From Codex
-Use $skill-installer to install:
-https://github.com/sunyusheng9664-hash/xhs-viral-breakdown-skills/tree/main/skills/xhs-image-text-viral-breakdown-to-bitable
-https://github.com/sunyusheng9664-hash/xhs-viral-breakdown-skills/tree/main/skills/xhs-video-viral-breakdown-to-bitable
-```
+解压 `xhs-viral-breakdown-to-bitable-codex.zip` 到 `~/.codex/skills/`，或使用 Codex Skill 安装器安装其中的 Skill 目录。重启 Codex 后使用。
 
-Or manually:
+### TRAE
 
-```bash
-git clone https://github.com/sunyusheng9664-hash/xhs-viral-breakdown-skills.git
-mkdir -p ~/.codex/skills
-cp -R xhs-viral-breakdown-skills/skills/xhs-image-text-viral-breakdown-to-bitable ~/.codex/skills/
-cp -R xhs-viral-breakdown-skills/skills/xhs-video-viral-breakdown-to-bitable ~/.codex/skills/
-```
+TRAE 安装包已经生成，但客户端导入方式和端到端运行尚待实际验收。验收前不要在销售页面标记为“已支持”。如客户端支持本地 Agent Skill，可解压后选择其中的 `SKILL.md` 或将完整 Skill 目录放入客户端要求的位置。
 
-Restart Codex after installation.
+### WorkBuddy
 
-## First-Run Rule
+在“技能 → 添加技能 → 上传技能”中导入 `xhs-viral-breakdown-to-bitable-workbuddy.zip`。首轮只承诺桌面端；网页端和移动端未完成端到端验证。
 
-Both skills require a Feishu/Lark CLI setup gate before processing Xiaohongshu links.
+## 首次授权
 
-On first run, the agent must ask the user for permission to create two long-lived Feishu Bitables:
-
-1. `小红书视频爆款拆解库`
-2. `小红书图文爆款拆解库`
-
-After creation, future video notes are written to the video library and future image-text notes are written to the image-text library. The local binding is stored at:
+先检查环境：
 
 ```text
-~/.codex/xhs-viral-breakdown-to-bitable/config.json
+node "/完整路径/xhs-viral-breakdown-to-bitable/scripts/xhs-breakdown.mjs" doctor
 ```
 
-## Fallback
+首次运行时如果只因 Skill 配置尚不存在而返回失败，继续完成下方初始化，之后重新运行 `doctor`。其他失败项应先修复。
 
-If Feishu CLI or authorization is unavailable, the skills should still produce an Excel backup and report the Feishu failure clearly.
+首次使用飞书 CLI 需要先初始化应用配置：
+
+```text
+lark-cli config init --new
+```
+
+默认配置使用 bot 身份。bot 不执行 `auth login`，应在飞书开发者后台为应用开通 Base 权限，然后检查状态：
+
+```text
+lark-cli auth status --json --verify
+```
+
+只有配置明确选择 user 身份时，才按最小权限发起用户授权：
+
+```text
+lark-cli auth login --domain base --no-wait --json
+```
+
+授权后再次运行 `auth status --json --verify`，确认配置所选身份为 `ready` 且 `verified`。登录状态和凭证始终由官方 CLI 管理。
+
+统一 Skill 的平台中立配置位于：
+
+- macOS/Linux：`~/.config/xhs-viral-breakdown/config.json`
+- Windows：`%APPDATA%/xhs-viral-breakdown/config.json`
+
+配置只保存 Base、Table、View 元数据，不保存飞书登录凭证。旧 Codex 配置可通过以下命令迁移，原文件不会删除：
+
+```text
+node "/完整路径/xhs-viral-breakdown-to-bitable/scripts/xhs-breakdown.mjs" configure --migrate
+```
+
+自动化测试可临时设置 `XHS_VIRAL_CONFIG_HOME` 隔离配置，不应覆盖用户的正式绑定。
+
+## 使用和故障降级
+
+用户可直接发送一条、多条或混合的小红书分享文案。统一 Skill 自动提取链接并按图文或视频分流。
+
+- 无字幕：保留视频元数据并标记 `未获取字幕`。
+- 飞书不可用：仍生成 `.xlsx` 备份并返回错误。
+- 重复链接：通过 noteId、原始链接、最终链接和本地归档索引去重。
+- 页面不再公开：记录失败阶段和原因，不编造内容。
+
+Windows、TRAE、WorkBuddy 只有在实际端到端验收后才应在销售页面标记为“已验证”。
