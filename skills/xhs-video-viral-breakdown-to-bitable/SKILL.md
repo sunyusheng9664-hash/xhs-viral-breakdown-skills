@@ -1,6 +1,6 @@
 ---
 name: xhs-video-viral-breakdown-to-bitable
-description: Use when the user wants to collect, analyze, and save Xiaohongshu video notes into a persistent Feishu/Lark Bitable. Handles public Xiaohongshu share links, extracts title, cover, author, engagement metrics, video duration, mediaV2 subtitle data, corrected spoken script, viral breakdown, and reusable tactics. Requires first-run Feishu CLI initialization and writes future video notes into the same configured Feishu Bitable.
+description: Legacy compatibility skill for collecting Xiaohongshu video notes into Feishu/Lark Bitable. Use only when the user explicitly names this legacy skill or an existing automation depends on it. For new image-text, video, or mixed-link requests, use xhs-viral-breakdown-to-bitable instead.
 ---
 
 # Xiaohongshu Video Viral Breakdown to Feishu Bitable
@@ -30,7 +30,7 @@ Hard rules:
 Recommended config path:
 
 ```text
-~/.codex/xhs-viral-breakdown-to-bitable/config.json
+~/.config/xhs-viral-breakdown/config.json
 ```
 
 ## Inputs
@@ -140,4 +140,3 @@ A completed run must report:
 - whether subtitles were obtained
 - Excel backup path
 - whether field order was verified
-

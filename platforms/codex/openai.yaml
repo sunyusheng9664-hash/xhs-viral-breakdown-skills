@@ -1,0 +1,6 @@
+interface:
+  display_name: "小红书爆款拆解入库"
+  short_description: "自动识别小红书图文或视频并归档到飞书"
+  default_prompt: "使用 $xhs-viral-breakdown-to-bitable 拆解这些小红书链接，生成备份并归档到对应飞书库。"
+policy:
+  allow_implicit_invocation: true
