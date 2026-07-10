@@ -55,6 +55,23 @@ After creation, future video notes are written to the video library and future i
 ~/.codex/xhs-viral-breakdown-to-bitable/config.json
 ```
 
+## Changelog
+
+### v1.1.0 (2026-07-10) - Diagnostic Analysis Framework Upgrade
+
+**Major upgrade to analysis methodology** — transformed from simple fill-in templates to comprehensive diagnostic frameworks.
+
+- **Image-Text Skill**: Added VISUAL-D cover model, TRIGGER interaction model, 3-layer viral attribution, and formulaic reusable tactics
+- **Video Skill**: Added 4D diagnostic model (timeline + density + trust + conversion), modular extraction, and script formula templates
+- **Both Skills**: Upgraded Analysis Standards with 5 core principles, 4-tier quality examples, and hard rules
+- See [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md) for full details
+
+### v1.0.0 (2026-06-11) - Initial Release
+
+- Initial release with image-text and video viral breakdown skills
+- Public-link workflow with Feishu Bitable integration
+- Basic analysis templates for cover, interaction, viral reasons, and reusable tactics
+
 ## Fallback
 
 If Feishu CLI or authorization is unavailable, the skills should still produce an Excel backup and report the Feishu failure clearly.
