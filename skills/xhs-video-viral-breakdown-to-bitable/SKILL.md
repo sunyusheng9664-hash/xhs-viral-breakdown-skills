@@ -100,16 +100,60 @@ Use [xhs_video_scraping.md](references/xhs_video_scraping.md), [analysis_templat
 
 ## Analysis Standards
 
-The video analysis must focus on the mechanics of a video:
+The video analysis must be diagnostic and framework-driven. Use the models in [analysis_templates.md](references/analysis_templates.md) to produce evidence-based, operational insights.
 
-- opening hook
-- pain point
-- authority or trend signal
-- narrative order
-- spoken structure
-- likely visual evidence
-- CTA or conversion design
-- reusable script formula
+### Core Principles
+
+1. **Timeline + density dual analysis**: Analyze both the time-axis structure (what happens every 3-5 seconds) and the information density curve (where it accelerates, where it slows down, and why).
+2. **Trust hierarchy**: Distinguish three layers of trust building — authenticity (real person), professionalism (expertise), and empathy (understanding). Identify which layer the video primarily relies on.
+3. **Conversion mechanics**: Analyze CTA type, position, timing, action threshold, and conversion funnel design.
+4. **Modular extraction**: Break reusable parts into independent modules, each with function, structure, replaceable variables, and applicable scenarios.
+5. **Success factor ranking**: Rank key success factors from high to low, estimating impact if removed.
+
+### Quality Examples
+
+**Bad (vague, no evidence):**
+
+```text
+这条视频节奏好，开头很抓人，内容有价值，所以爆了。
+```
+
+**Medium (specific but shallow):**
+
+```text
+开头用了反常识观点，中间讲了方法论，结尾引导关注。适合想做自媒体的人看。
+```
+
+**Good (mechanics-focused):**
+
+```text
+开头用"90%的人都做错了"制造认知冲突，3秒内留住用户；中段用"工具名→痛点→能力→结果"的结构展开，每10秒一个信息高点；结尾用"评论区领资料"降低行动门槛。
+```
+
+**Excellent (framework-driven, all dimensions covered):**
+
+```text
+时间轴分析：0-3秒用反常识钩子（"为什么我不建议你做自媒体"），决策机制为好奇心+恐惧感；3-10秒放大痛点（"每天花3小时，播放量不到500"），情绪曲线焦虑上升；10-35秒价值交付（"3个工具+1个流程"），信息密度高，每3秒一个要点；35-40秒CTA（"评论区扣1领流程图"），门槛中等，即时回报明确。
+
+信息密度：0-10秒低密度（铺垫），10-30秒高密度（干货），30-35秒低密度（过渡），35-40秒中密度（CTA）。加速点在10秒处（进入方法论），减速点在30秒处（强调重点）。
+
+信任建立：主要依赖第一层（真实感）——口语化表达（"说实话""我自己也踩过坑"）+具体细节（"去年3月""花了2万"）。第二层（专业性）辅助——使用"SOP""变现闭环"等术语。
+
+可复制模块：①反常识钩子="为什么我不建议X"（X=常见做法）；②痛点三段式="你是不是也___→每次___都特别___→其实根本原因是___"；③低门槛CTA="如果你也想___，可以先___"。
+
+脚本公式：反常识钩子(3秒)+痛点放大(7秒)+方法论步骤(主体)+信任案例(穿插)+低门槛CTA(5秒)。信息密度曲线：低→高→低→中。
+```
+
+### Hard Rules
+
+- **Timeline analysis**: Must cover 0-3s, 3-10s, 10-30s, and 30s+ segments. Each segment must specify hook type, information delivery, and emotion/function.
+- **Density analysis**: Must identify high-density segments, low-density segments, and transition points with rationale.
+- **Trust analysis**: Must distinguish three layers (authenticity/professionalism/empathy) and identify the primary layer.
+- **Conversion analysis**: Must specify CTA type, position, timing, action threshold, and immediate reward.
+- **Reusable parts**: Must be extracted as independent modules with function, structure, variables, and scenarios. Must include a complete script formula with replaceable variables.
+- **Success ranking**: Must rank top 3 success factors and estimate impact if removed.
+- **Quality gate**: Before final output, run the Analysis Quality Checklist in [analysis_templates.md](references/analysis_templates.md).
+- **Subtitle limitation**: If only subtitles are available, insert the required disclaimer at the beginning of analysis and use cautious phrasing for visual elements.
 
 Do not claim visual details unless you inspected frames, cover, or source data. If only subtitles are available, write from the subtitle and metadata.
 

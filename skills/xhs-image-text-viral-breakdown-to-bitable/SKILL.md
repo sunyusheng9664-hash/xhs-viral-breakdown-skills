@@ -102,19 +102,55 @@ Use [xhs_scraping.md](references/xhs_scraping.md), [analysis_templates.md](refer
 
 ## Analysis Standards
 
-Analysis must be specific and operational.
+Analysis must be diagnostic, not descriptive. Use the frameworks in [analysis_templates.md](references/analysis_templates.md) to produce evidence-based, operational insights.
 
-Bad:
+### Core Principles
+
+1. **From description to diagnosis**: Do not ask "what does the cover look like?" Ask "what problem is the cover solving for the user?"
+2. **From listing to causation**: Do not list elements side by side. Explain the causal chain.
+3. **From summary to formula**: Reusable tactics must be formulaic templates with replaceable variables, not descriptive summaries.
+4. **From static to dynamic**: Consider information density curves and user psychological curves.
+5. **From single-layer to multi-layer**: Viral reasons must be separated into necessary conditions, sufficient conditions, and amplifiers.
+
+### Quality Examples
+
+**Bad (vague, no evidence):**
 
 ```text
 标题吸引人，内容有价值，所以容易爆。
 ```
 
-Good:
+**Medium (specific but shallow):**
 
 ```text
-封面把结果界面直接前置，降低用户判断成本；标题用“不是资料库，是内容运营系统”制造反常识，正文再用模块化结构证明这个系统能落地。收藏动机来自可复用流程，而评论动机来自用户追问模板和工具设置。
+封面用了大字标题，突出了痛点，用户一看就想点。正文是清单形式，方便收藏。
 ```
+
+**Good (diagnostic, causal, operational):**
+
+```text
+封面把结果界面直接前置，降低用户判断成本；标题用"不是资料库，是内容运营系统"制造反常识，正文再用模块化结构证明这个系统能落地。收藏动机来自可复用流程，而评论动机来自用户追问模板和工具设置。
+```
+
+**Excellent (framework-driven, all dimensions covered):**
+
+```text
+封面分析（VISUAL-D）：视觉焦点为左上角的"30天"红色大字（占30%面积）；信息层级为"数字→痛点词→结果承诺"三层；信号类型为利益信号（"月入3W"）；差异化在于使用真实数据截图而非普通配图；决策成本低，用户0.3秒即可判断价值。
+
+互动诱因（TRIGGER）：主要驱动力为Gain（收藏后可复用的清单）和Gap（标题留下"如何做到"的缺口）；次要驱动力为Identity（"打工人"标签）。互动入口：标题埋入反常识钩子，正文结尾设置"评论区领模板"CTA。
+
+爆款原因（三层归因）：第一层（必要）——选题击中"副业刚需"高需求场景；第二层（充分/可复制）——封面决策成本极低+正文3秒交付核心价值+算法关键词匹配；第三层（放大）——踩中Q1求职季趋势+作者有职场博主背书。
+
+可复制点：标题公式=[数字]+[反常识判断]+[结果承诺]；封面公式=[大字数字]+[痛点关键词]+[真实截图]；正文结构=痛点共鸣(20%)→反常识观点(30%)→方法论步骤(40%)→CTA(10%)。
+```
+
+### Hard Rules
+
+- **Cover analysis**: Every VISUAL-D dimension must have at least one concrete evidence. Never use adjectives like "attractive" "beautiful" "valuable" without evidence.
+- **Interaction drivers**: Must distinguish primary drivers (1-2) from secondary drivers (1-2). Do not list all possibilities equally.
+- **Viral reasons**: Must separate into Layer 1 (necessary), Layer 2 (sufficient/replicable), and Layer 3 (amplifiers). Include a causal chain summary.
+- **Reusable tactics**: Must be formulaic with replaceable variables. Bad: "use numbers in title". Good: "Title formula = [number] + [counter-intuitive judgment] + [result promise]".
+- **Quality gate**: Before final output, run the Analysis Quality Checklist in [analysis_templates.md](references/analysis_templates.md).
 
 Do not claim you saw visual details unless you inspected the image or the HTML exposes enough visible information.
 
