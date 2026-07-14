@@ -1,0 +1,5 @@
+interface:
+  display_name: "小红书图文采集 Lite"
+  short_description: "采集小红书图文公开数据并归档到飞书"
+  default_prompt: "Use $xhs-image-text-lite-to-bitable to collect public Xiaohongshu image-text note data into Feishu."
+

@@ -1,0 +1,5 @@
+interface:
+  display_name: "小红书视频采集 Lite"
+  short_description: "采集小红书视频公开基础数据并归档飞书"
+  default_prompt: "Use $xhs-video-lite-to-bitable to collect public Xiaohongshu video note metadata into Feishu."
+

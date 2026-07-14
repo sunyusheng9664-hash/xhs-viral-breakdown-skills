@@ -1,31 +1,15 @@
-## v1.1.0 - Diagnostic Analysis Framework Upgrade
+## v1.1.0 - 诊断式爆款分析框架升级
 
-### What's Changed
+### 本次更新
 
-This release transforms the analysis methodology from simple fill-in templates to comprehensive diagnostic frameworks.
+- 图文拆解新增 VISUAL-D 封面诊断、TRIGGER 互动诱因、三层爆款归因与公式化复用模板。
+- 视频拆解升级为时间轴、信息密度、信任建立、转化设计四维分析，并输出可独立复用的模块和脚本公式。
+- 两类拆解均加入证据优先、分析限制说明、无法判断即明确标注，以及反空泛表述的质量门槛。
 
-#### Image-Text Skill (`xhs-image-text-viral-breakdown-to-bitable`)
-- **Cover Analysis**: New VISUAL-D diagnostic model (Viewport, Information, Signal, Uniqueness, Action, Layout, Decision)
-- **Interaction Drivers**: New TRIGGER model (Timing, Reward, Identity, Gap, Gain, Ego, Risk) with primary/secondary driver distinction
-- **Viral Reasons**: New 3-layer attribution model (Necessary/Sufficient/Amplifier conditions) with causal chain analysis
-- **Reusable Tactics**: Now requires formulaic templates with replaceable variables instead of descriptive summaries
-- **Quality Gate**: Added analysis quality checklist
+### 适用范围
 
-#### Video Skill (`xhs-video-viral-breakdown-to-bitable`)
-- **Viral Breakdown**: New 4D diagnostic model (Timeline + Information Density + Trust Building + Conversion Design)
-- **Trust Hierarchy**: 3-layer analysis (Authenticity / Professionalism / Empathy)
-- **Reusable Parts**: Modular extraction with function, structure, variables, and applicable scenarios
-- **Script Formula**: Complete formula with replaceable variables and density curve patterns
-- **Quality Gate**: Added analysis quality checklist
+本地统一 Pro Skill `xhs-viral-breakdown-to-bitable` 已应用上述方法；旧图文/视频 Skill 继续作为兼容入口。Lite 采集版不包含爆款分析，因此不受本次分析框架升级影响。
 
-#### Both Skills
-- **SKILL.md Analysis Standards**: Upgraded with 5 core principles, 4-tier quality examples (Bad/Medium/Good/Excellent), and hard rules
-- **Framework-driven output**: All analyses must now use structured diagnostic models
+### 兼容性
 
-### Breaking Changes
-- Analysis output format is significantly more structured and detailed
-- AI agents must now follow diagnostic frameworks rather than simple templates
-- Reusable tactics must be formulaic with replaceable variables
-
-### Migration Guide
-No action required. The skill interfaces remain unchanged. The analysis depth and structure will improve automatically on next use.
+飞书字段、Excel 备份、去重与配置接口不变。既有用户无需迁移配置；后续运行会按新方法生成分析结果。
