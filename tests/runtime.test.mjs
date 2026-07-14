@@ -9,6 +9,8 @@ import { configPath, legacyConfigPath, loadConfig, normalizeConfig, validateConf
 import { selectPending } from '../skills/xhs-viral-breakdown-to-bitable/scripts/lib/dedupe.mjs';
 import { extractInitialStateText, extractUrls, fetchPage, findNoteObject, findSubtitleUrl, normalizeNote, parseCount, parseInitialState, parseMediaV2, srtToTranscript } from '../skills/xhs-viral-breakdown-to-bitable/scripts/lib/xhs.mjs';
 import { parseJsonOutput, valuesAsStrings } from '../skills/xhs-viral-breakdown-to-bitable/scripts/lib/lark.mjs';
+import { buildMigrationPlan, classifyRepairFailure, recordObjects } from '../skills/xhs-viral-breakdown-to-bitable/scripts/lib/migration.mjs';
+import { downloadFreshMedia } from '../skills/xhs-viral-breakdown-to-bitable/scripts/lib/media.mjs';
 import { extractionOutcome } from '../skills/xhs-viral-breakdown-to-bitable/scripts/lib/outcome.mjs';
 import { writeXlsx } from '../skills/xhs-viral-breakdown-to-bitable/scripts/lib/xlsx.mjs';
 
@@ -89,6 +91,56 @@ test('配置校验拒绝缺少绑定标识', () => {
   assert.ok(errors.some((error) => error.includes('base_token')));
 });
 
+test('配置兼容 Schema v1 并保留 Schema v2', () => {
+  assert.equal(normalizeConfig({ schema_version: 1 }).schema_version, 1);
+  assert.equal(normalizeConfig({ schema_version: 2 }).schema_version, 2);
+});
+
+test('Schema v2 迁移只新增缺失字段并保留自定义视图字段', () => {
+  const fields = { data: { items: [{ id: 'fld1', name: '标题', type: 'text' }, { id: 'fld2', name: '封面图片', type: 'attachment' }, { id: 'fld3', name: '自定义标签', type: 'text' }] } };
+  const visible = { data: { visible_fields: ['标题', '封面', '图片', '自定义标签'] } };
+  const plan = buildMigrationPlan('image_text', fields, visible);
+  assert.ok(!plan.missing_fields.some((field) => field.name === '封面图片'));
+  assert.ok(plan.missing_fields.some((field) => field.name === '图片附件'));
+  assert.ok(plan.visible_fields_after.includes('自定义标签'));
+  assert.ok(!plan.visible_fields_after.includes('封面'));
+  assert.ok(!plan.visible_fields_after.includes('图片'));
+});
+
+test('Schema v2 兼容视图返回字段 ID 并只隐藏旧 CDN 字段', () => {
+  const fields = { data: { items: [{ id: 'fld-cover-old', name: '封面', type: 'text' }, { id: 'fld-custom', name: '自定义标签', type: 'text' }] } };
+  const visible = { data: { visible_fields: ['fld-cover-old', 'fld-custom'] } };
+  const plan = buildMigrationPlan('video', fields, visible);
+  assert.ok(!plan.visible_fields_after.includes('fld-cover-old'));
+  assert.ok(plan.visible_fields_after.includes('fld-custom'));
+  assert.ok(plan.visible_fields_after.includes('封面图片'));
+});
+
+test('历史修复失败不会把风控或短链错误误写成已删除', () => {
+  assert.equal(classifyRepairFailure({ original_url: 'https://xhslink.com/o/a', reason: 'HTTP 403' }), '抓取受限');
+  assert.equal(classifyRepairFailure({ original_url: 'https://xhslink.com/o/a', reason: '无法读取，HTTP 404' }), '短链失效');
+  assert.equal(classifyRepairFailure({ original_url: 'https://www.xiaohongshu.com/explore/a', reason: '该笔记已删除' }), '源笔记不可访问');
+});
+
+test('递归读取飞书记录并保留 record_id', () => {
+  const rows = recordObjects({ data: { items: [{ record_id: 'rec1', fields: { 链接: 'https://xhslink.com/o/a' } }] } });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].record_id, 'rec1');
+});
+
+test('图片下载只使用本次从原笔记提取的地址并保持顺序命名', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-media-'));
+  const calls = [];
+  const fakeFetch = async (url) => {
+    calls.push(url);
+    return { ok: true, status: 200, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => new TextEncoder().encode(url).buffer };
+  };
+  const result = await downloadFreshMedia({ type: 'image_text', final_url: 'https://www.xiaohongshu.com/explore/n1', data: { image_urls: ['https://fresh/1', 'https://fresh/2'] } }, dir, fakeFetch);
+  assert.deepEqual(calls, ['https://fresh/1', 'https://fresh/2']);
+  assert.deepEqual(result.files.map((file) => path.basename(file)), ['01_封面.jpg', '02.jpg']);
+  assert.equal(result.errors.length, 0);
+});
+
 test('飞书 CLI JSON 可从附带日志的输出解析', () => {
   assert.deepEqual(parseJsonOutput('log line\n{"ok":true}\n'), { ok: true });
 });
@@ -162,11 +214,46 @@ test('doctor 在配置缺失时返回非零退出码', () => {
   assert.equal(JSON.parse(result.stdout).config.status, 'missing');
 });
 
+test('Schema v2 先预览，未确认不能迁移，确认后可重复安全执行', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-schema-v2-'));
+  const bin = path.join(dir, 'bin');
+  const configHome = path.join(dir, 'config');
+  const reports = path.join(dir, 'reports');
+  const log = path.join(dir, 'lark.log');
+  fs.mkdirSync(bin, { recursive: true });
+  writeJsonAtomic(path.join(configHome, 'config.json'), normalizeConfig({ schema_version: 1, initialized: true, feishu: { identity: 'bot', image_text: { base_token: 'image', table_id: 'table-image', view_id: 'view-image' }, video: { base_token: 'video', table_id: 'table-video', view_id: 'view-video' } } }));
+  const fake = path.join(bin, 'lark-cli');
+  fs.writeFileSync(fake, `#!/bin/sh
+echo "$*" >> "$LARK_TEST_LOG"
+if [ "$1" = "--version" ]; then echo "1.0.0"; exit 0; fi
+case " $* " in
+  *" auth status "*) echo '{"identities":{"bot":{"status":"ready","available":true,"verified":true}}}' ;;
+  *" +field-list "*) echo '{"data":{"items":[{"id":"fld-title","name":"标题","type":"text"},{"id":"fld-custom","name":"自定义标签","type":"text"}]}}' ;;
+  *" +view-get-visible-fields "*) echo '{"data":{"visible_fields":["标题","封面","图片","自定义标签"]}}' ;;
+  *) echo '{"ok":true}' ;;
+esac
+`);
+  fs.chmodSync(fake, 0o755);
+  const cli = fileURLToPath(new URL('../skills/xhs-viral-breakdown-to-bitable/scripts/xhs-breakdown.mjs', import.meta.url));
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, XHS_VIRAL_CONFIG_HOME: configHome, LARK_TEST_LOG: log };
+  const plan = spawnSync(process.execPath, [cli, 'schema-plan', '--output-dir', reports], { encoding: 'utf8', env });
+  assert.equal(plan.status, 0, plan.stderr || plan.stdout);
+  assert.equal(JSON.parse(plan.stdout).action, 'schema_plan');
+  const blocked = spawnSync(process.execPath, [cli, 'schema-migrate', '--output-dir', reports], { encoding: 'utf8', env });
+  assert.equal(blocked.status, 1, blocked.stderr || blocked.stdout);
+  const migrated = spawnSync(process.execPath, [cli, 'schema-migrate', '--confirm-migrate', '--output-dir', reports], { encoding: 'utf8', env });
+  assert.equal(migrated.status, 0, migrated.stderr || migrated.stdout);
+  assert.equal(JSON.parse(migrated.stdout).schema_version, 2);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(configHome, 'config.json'), 'utf8')).schema_version, 2);
+  assert.match(fs.readFileSync(log, 'utf8'), /\+field-create/);
+  assert.match(fs.readFileSync(log, 'utf8'), /\+view-set-visible-fields/);
+});
+
 test('飞书命令失败时仍保留 Excel 备份', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-write-failure-'));
   const configHome = path.join(dir, 'config');
   fs.mkdirSync(configHome, { recursive: true });
-  writeJsonAtomic(path.join(configHome, 'config.json'), normalizeConfig({ initialized: true, feishu: { identity: 'bot', image_text: { base_token: 'base', table_id: 'table', view_id: 'view' }, video: { base_token: 'base2', table_id: 'table2', view_id: 'view2' } } }));
+  writeJsonAtomic(path.join(configHome, 'config.json'), normalizeConfig({ schema_version: 2, initialized: true, feishu: { identity: 'bot', image_text: { base_token: 'base', table_id: 'table', view_id: 'view' }, video: { base_token: 'base2', table_id: 'table2', view_id: 'view2' } } }));
   const input = path.join(dir, 'analyzed.json');
   fs.writeFileSync(input, JSON.stringify({ items: [{ status: 'success', type: 'image_text', original_url: 'https://xhslink.com/a', final_url: 'https://www.xiaohongshu.com/explore/n1', note_id: 'n1', data: { title: '标题', topics: [], image_urls: [], metrics: {} }, analysis: { body_summary: '摘要', cover_analysis: '未检查封面', interaction_drivers: '收藏', viral_reasons: '结构', reusable_tactics: '模板' } }] }));
   const cli = fileURLToPath(new URL('../skills/xhs-viral-breakdown-to-bitable/scripts/xhs-breakdown.mjs', import.meta.url));

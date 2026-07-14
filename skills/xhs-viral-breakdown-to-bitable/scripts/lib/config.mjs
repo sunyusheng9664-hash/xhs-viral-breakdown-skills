@@ -63,7 +63,7 @@ export function normalizeConfig(input = {}) {
     view_id: source.image_text_view_id,
   } : (source.image_text || input.image_text || {});
   return {
-    schema_version: 1,
+    schema_version: Number(input.schema_version) === 2 ? 2 : 1,
     initialized: Boolean(input.initialized || (video.base_token && imageText.base_token)),
     created_at: input.created_at || new Date().toISOString(),
     timezone: input.timezone || 'Asia/Shanghai',
@@ -77,7 +77,7 @@ export function normalizeConfig(input = {}) {
 
 export function validateConfig(config, { requireBindings = true } = {}) {
   const errors = [];
-  if (!config || config.schema_version !== 1) errors.push('schema_version 必须为 1');
+  if (!config || ![1, 2].includes(config.schema_version)) errors.push('schema_version 必须为 1 或 2');
   for (const type of ['video', 'image_text']) {
     const binding = config?.feishu?.[type];
     if (!binding) {

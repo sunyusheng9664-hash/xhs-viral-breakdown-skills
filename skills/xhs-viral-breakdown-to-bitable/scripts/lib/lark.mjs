@@ -116,6 +116,47 @@ export function listRecords(binding, identity) {
   return pages;
 }
 
+export function listRecordDetails(binding, identity, fields = []) {
+  const pages = [];
+  let offset = 0;
+  for (let page = 0; page < 100; page += 1) {
+    const args = ['base', '+record-list', '--as', identity, '--base-token', binding.base_token, '--table-id', binding.table_id];
+    for (const field of fields) args.push('--field-id', field);
+    args.push('--offset', String(offset), '--limit', '200', '--format', 'json');
+    const result = runLark(args).json;
+    pages.push(result);
+    const data = result?.data;
+    const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data?.items) ? data.items : [];
+    if (!data?.has_more || rows.length === 0) break;
+    offset += rows.length;
+  }
+  return pages;
+}
+
+export function listFields(binding, identity) {
+  return runLark(['base', '+field-list', '--as', identity, '--base-token', binding.base_token, '--table-id', binding.table_id, '--limit', '200', '--format', 'json']).json;
+}
+
+export function createField(binding, identity, field) {
+  return runLark(['base', '+field-create', '--as', identity, '--base-token', binding.base_token, '--table-id', binding.table_id, '--json', JSON.stringify(field), '--format', 'json']).json;
+}
+
+export function getVisibleFields(binding, identity) {
+  return runLark(['base', '+view-get-visible-fields', '--as', identity, '--base-token', binding.base_token, '--table-id', binding.table_id, '--view-id', binding.view_id, '--format', 'json']).json;
+}
+
+export function updateRecord(binding, identity, recordId, fields) {
+  return runLark(['base', '+record-upsert', '--as', identity, '--base-token', binding.base_token, '--table-id', binding.table_id, '--record-id', recordId, '--json', JSON.stringify(fields), '--format', 'json']).json;
+}
+
+export function uploadAttachments(binding, identity, recordId, field, files) {
+  if (!files.length) return null;
+  const args = ['base', '+record-upload-attachment', '--as', identity, '--base-token', binding.base_token, '--table-id', binding.table_id, '--record-id', recordId, '--field-id', field];
+  for (const file of files) args.push('--file', file);
+  args.push('--format', 'json');
+  return runLark(args).json;
+}
+
 export function batchCreate(binding, identity, fields, rows) {
   return runLark(['base', '+record-batch-create', '--as', identity, '--base-token', binding.base_token, '--table-id', binding.table_id, '--json', JSON.stringify({ fields, rows }), '--format', 'json']).json;
 }
