@@ -68,21 +68,21 @@ node "<skill-dir>/scripts/xhs-breakdown.mjs" configure --create-test --confirm-c
 
 不得把填写后的绑定文件放回 Skill 目录或发布包。
 
-## 从 Schema v1 升级到 v2
+## 更新已有 Skill
 
-先只读预览，不改飞书：
-
-```text
-node "<skill-dir>/scripts/xhs-breakdown.mjs" schema-plan --output-dir <报告目录>
-```
-
-向用户说明：迁移只新增“封面图片、图片附件、笔记ID、图片归档状态、归档错误、最后归档时间”等字段；旧“封面/图片”字段保留，仅从默认视图隐藏；用户自己的字段继续保留。用户明确同意后运行：
+先识别是首次安装还是更新，并只读检查现有表结构：
 
 ```text
-node "<skill-dir>/scripts/xhs-breakdown.mjs" schema-migrate --confirm-migrate --output-dir <报告目录>
+node "<skill-dir>/scripts/xhs-breakdown.mjs" upgrade-check --output-dir <报告目录>
 ```
 
-命令会保存迁移前后的字段和视图报告。迁移可重复执行，已存在字段不会重复创建。
+返回 `install` 时继续首次配置；返回 `ready` 时直接使用；返回 `upgrade` 时，必须把 `customer_message` 原样展示给用户并停止。用户明确同意本次方案后，使用同一次检查返回的 `plan_id` 运行：
+
+```text
+node "<skill-dir>/scripts/xhs-breakdown.mjs" upgrade-apply --plan-id <plan_id> --confirm-upgrade --output-dir <报告目录>
+```
+
+命令会保存升级前后的字段和视图报告。它只新增缺失字段、保留旧字段和自定义字段。若方案发生变化，旧 `plan_id` 会失效，必须重新说明并授权。`schema-plan` 和 `schema-migrate` 仅保留为兼容入口，同样要求匹配的 `plan_id` 和明确确认。
 
 ## 修复历史图片
 
