@@ -214,7 +214,17 @@ test('doctor 在配置缺失时返回非零退出码', () => {
   assert.equal(JSON.parse(result.stdout).config.status, 'missing');
 });
 
-test('Schema v2 先预览，未确认不能迁移，确认后可重复安全执行', () => {
+test('无旧配置时识别为首次安装且不访问飞书', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-upgrade-install-'));
+  const cli = fileURLToPath(new URL('../skills/xhs-viral-breakdown-to-bitable/scripts/xhs-breakdown.mjs', import.meta.url));
+  const result = spawnSync(process.execPath, [cli, 'upgrade-check'], { encoding: 'utf8', env: { ...process.env, HOME: dir, XHS_VIRAL_CONFIG_HOME: path.join(dir, 'config'), PATH: '' } });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.mode, 'install');
+  assert.equal(output.next_action, 'configure');
+});
+
+test('更新先说明和授权，方案变化或未授权时不能迁移', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-schema-v2-'));
   const bin = path.join(dir, 'bin');
   const configHome = path.join(dir, 'config');
@@ -236,14 +246,23 @@ esac
   fs.chmodSync(fake, 0o755);
   const cli = fileURLToPath(new URL('../skills/xhs-viral-breakdown-to-bitable/scripts/xhs-breakdown.mjs', import.meta.url));
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, XHS_VIRAL_CONFIG_HOME: configHome, LARK_TEST_LOG: log };
-  const plan = spawnSync(process.execPath, [cli, 'schema-plan', '--output-dir', reports], { encoding: 'utf8', env });
-  assert.equal(plan.status, 0, plan.stderr || plan.stdout);
-  assert.equal(JSON.parse(plan.stdout).action, 'schema_plan');
-  const blocked = spawnSync(process.execPath, [cli, 'schema-migrate', '--output-dir', reports], { encoding: 'utf8', env });
+  const check = spawnSync(process.execPath, [cli, 'upgrade-check', '--output-dir', reports], { encoding: 'utf8', env });
+  assert.equal(check.status, 0, check.stderr || check.stdout);
+  const preview = JSON.parse(check.stdout);
+  assert.equal(preview.mode, 'upgrade');
+  assert.equal(preview.authorization.scope, 'schema_only');
+  assert.deepEqual(preview.authorization.excludes, ['历史图片修复']);
+  assert.match(preview.customer_message, /是否授权我升级现有多维表格结构/);
+  assert.doesNotMatch(fs.readFileSync(log, 'utf8'), /\+field-create/);
+  const blocked = spawnSync(process.execPath, [cli, 'upgrade-apply', '--plan-id', preview.plan_id, '--output-dir', reports], { encoding: 'utf8', env });
   assert.equal(blocked.status, 1, blocked.stderr || blocked.stdout);
-  const migrated = spawnSync(process.execPath, [cli, 'schema-migrate', '--confirm-migrate', '--output-dir', reports], { encoding: 'utf8', env });
+  const stale = spawnSync(process.execPath, [cli, 'upgrade-apply', '--plan-id', 'stale-plan', '--confirm-upgrade', '--output-dir', reports], { encoding: 'utf8', env });
+  assert.equal(stale.status, 1, stale.stderr || stale.stdout);
+  assert.match(`${stale.stdout}${stale.stderr}`, /原授权失效/);
+  const migrated = spawnSync(process.execPath, [cli, 'upgrade-apply', '--plan-id', preview.plan_id, '--confirm-upgrade', '--output-dir', reports], { encoding: 'utf8', env });
   assert.equal(migrated.status, 0, migrated.stderr || migrated.stdout);
   assert.equal(JSON.parse(migrated.stdout).schema_version, 2);
+  assert.match(JSON.parse(migrated.stdout).next_authorization, /单独征求授权/);
   assert.equal(JSON.parse(fs.readFileSync(path.join(configHome, 'config.json'), 'utf8')).schema_version, 2);
   assert.match(fs.readFileSync(log, 'utf8'), /\+field-create/);
   assert.match(fs.readFileSync(log, 'utf8'), /\+view-set-visible-fields/);

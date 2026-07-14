@@ -2,7 +2,7 @@
 
 把用户主动提供的公开小红书图文或视频链接转换成结构化内容资产，生成 Excel 备份，并分别写入长期使用的飞书多维表格。
 
-当前版本：v1.2.0。新增飞书 Schema v2 安全迁移、真实图片附件和历史图片修复；保留 v1.1.0 的诊断式爆款分析。详见 [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md)。
+当前版本：v1.2.1。更新旧版 Skill 时会先说明改了什么、原表要怎样调整和准备如何执行，取得用户授权后才修改表结构；首次安装不显示升级提示。详见 [RELEASE_NOTES_v1.2.1.md](RELEASE_NOTES_v1.2.1.md)。
 
 本仓库现在包含两个对外交付版本：
 
@@ -108,13 +108,14 @@ node "/完整路径/xhs-viral-breakdown-to-bitable/scripts/xhs-breakdown.mjs" co
 - 重复链接：通过 noteId、原始链接、最终链接和本地归档索引去重。
 - 页面不再公开：记录失败阶段和原因，不编造内容。
 - 图片归档：图片先下载为本地临时文件，再上传到飞书附件字段，不把临时 CDN 链接当作长期存储。
-- 已有表升级：先运行 `schema-plan`；确认后运行 `schema-migrate --confirm-migrate`。
+- 已有表升级：先运行 `upgrade-check` 并向用户展示返回的说明；用户明确同意后，按返回的 `plan_id` 运行 `upgrade-apply --confirm-upgrade`。
 - 历史图片：先运行 `repair-images --dry-run`；确认后再运行 `repair-images --confirm-repair`。
 
 ## 回滚
 
 - 升级前完整基线：Git 标签 `pre-v1.2.0-20260714`
-- 本次发布版本：Git 标签 `v1.2.0`
+- v1.2.1 升级前基线：Git 标签 `pre-v1.2.1-20260714`（指向 v1.2.0）
+- 本次发布版本：Git 标签 `v1.2.1`
 - 回滚只切换代码版本，不会自动删除飞书中已新增的字段或附件；这些新增内容与旧版兼容，可保留。
 
 Windows、TRAE、WorkBuddy 只有在实际端到端验收后才应在销售页面标记为“已验证”。

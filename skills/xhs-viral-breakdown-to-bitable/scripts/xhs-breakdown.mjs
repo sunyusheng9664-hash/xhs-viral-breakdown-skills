@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { configPath, indexPath, loadConfig, loadIndex, normalizeConfig, saveIndex, validateConfig, writeJsonAtomic } from './lib/config.mjs';
+import { configPath, indexPath, legacyConfigPath, loadConfig, loadIndex, normalizeConfig, readJson, saveIndex, validateConfig, writeJsonAtomic } from './lib/config.mjs';
 import { identities, selectPending } from './lib/dedupe.mjs';
 import { extractOne, extractUrls } from './lib/xhs.mjs';
 import { batchCreate, createBase, createField, discoverLark, getVisibleFields, inspectLarkAuth, listFields, listRecordDetails, listRecords, setVisibleFields, updateRecord, uploadAttachments, valuesAsStrings } from './lib/lark.mjs';
@@ -257,22 +258,117 @@ function migrationPlans(config) {
   return plans;
 }
 
-async function schemaPlan(args) {
-  ensureNode();
-  const config = configured();
-  const plans = migrationPlans(config);
-  const report = migrationReportPath(args, 'schema-v2-plan');
-  writeJsonAtomic(report, { generated_at: new Date().toISOString(), current_schema_version: config.schema_version, target_schema_version: DATA_SCHEMA_VERSION, plans });
-  json({ ok: true, action: 'schema_plan', report, plans });
+function stable(value) {
+  if (Array.isArray(value)) return value.map(stable);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]));
+  return value;
 }
 
-async function schemaMigrate(args) {
+function upgradePlanId(config, plans) {
+  const target = {
+    schema_version: DATA_SCHEMA_VERSION,
+    bindings: Object.fromEntries(['image_text', 'video'].map((type) => [type, {
+      base_token: config.feishu[type].base_token,
+      table_id: config.feishu[type].table_id,
+      view_id: config.feishu[type].view_id,
+    }])),
+    plans,
+  };
+  return crypto.createHash('sha256').update(JSON.stringify(stable(target))).digest('hex').slice(0, 16);
+}
+
+function existingUpgradeConfig() {
+  const current = loadConfig({ migrate: false });
+  if (current.config) return { config: current.config, source: 'current', path: current.path };
+  const legacy = legacyConfigPath();
+  if (fs.existsSync(legacy)) return { config: normalizeConfig(readJson(legacy)), source: 'legacy', path: legacy };
+  return null;
+}
+
+function plansNeedChanges(config, plans) {
+  if (config.schema_version !== DATA_SCHEMA_VERSION) return true;
+  return Object.values(plans).some((plan) => plan.missing_fields.length > 0
+    || JSON.stringify(plan.visible_fields_before) !== JSON.stringify(plan.visible_fields_after));
+}
+
+function customerUpdateMessage(plans) {
+  const imageAdded = plans.image_text.missing_fields.map((field) => field.name);
+  const videoAdded = plans.video.missing_fields.map((field) => field.name);
+  return [
+    '检测到你正在从旧版本升级。',
+    '',
+    '这次更新主要解决图片链接失效和历史图片难以修复的问题：',
+    '- 图文笔记保存封面和完整图片附件；',
+    '- 视频笔记保存真实封面附件；',
+    '- 新增图片归档状态和错误记录；',
+    '- 支持根据原笔记链接修复历史图片。',
+    '',
+    '原表需要进行以下升级：',
+    `- 图文库新增：${imageAdded.length ? imageAdded.join('、') : '无需新增字段'}；`,
+    `- 视频库新增：${videoAdded.length ? videoAdded.join('、') : '无需新增字段'}；`,
+    '- 原“封面”和“图片”链接字段继续保留，但不再作为主要展示字段；',
+    '- 原有数据和自定义字段不会被删除或覆盖。',
+    '',
+    '准备执行：备份当前结构 → 只新增缺失字段 → 增量调整默认视图 → 生成升级报告。',
+    '',
+    '是否授权我升级现有多维表格结构？本次授权不包含历史图片修复。',
+  ].join('\n');
+}
+
+function upgradeAssessment(args = {}) {
+  const candidate = existingUpgradeConfig();
+  if (!candidate) {
+    return {
+      ok: true,
+      action: 'upgrade_check',
+      mode: 'install',
+      message: '未检测到旧版配置。这是首次安装流程，不执行表格升级；请继续完成飞书绑定或新建表格。',
+      next_action: 'configure',
+    };
+  }
+  const errors = validateConfig(candidate.config);
+  if (errors.length) return { ok: false, action: 'upgrade_check', mode: 'blocked', source: candidate.source, errors };
+  const plans = migrationPlans(candidate.config);
+  const planId = upgradePlanId(candidate.config, plans);
+  const needsUpgrade = plansNeedChanges(candidate.config, plans);
+  const result = {
+    ok: true,
+    action: 'upgrade_check',
+    mode: needsUpgrade ? 'upgrade' : 'ready',
+    source: candidate.source,
+    current_schema_version: candidate.config.schema_version,
+    target_schema_version: DATA_SCHEMA_VERSION,
+    plan_id: planId,
+    plans,
+    authorization: needsUpgrade ? {
+      required: true,
+      scope: 'schema_only',
+      excludes: ['历史图片修复'],
+      apply_command: `upgrade-apply --plan-id ${planId} --confirm-upgrade`,
+    } : { required: false },
+    customer_message: needsUpgrade ? customerUpdateMessage(plans) : '当前多维表格已经完成升级，可以直接使用新版 Skill。',
+  };
+  if (args['output-dir']) {
+    result.report = migrationReportPath(args, 'upgrade-check');
+    writeJsonAtomic(result.report, { ...result, generated_at: new Date().toISOString() });
+  }
+  return { ...result, config: candidate.config };
+}
+
+async function upgradeCheck(args) {
   ensureNode();
-  if (!args['confirm-migrate']) throw new Error('迁移会新增字段并增量调整默认视图；请先向用户说明不会删除旧字段，取得同意后传入 --confirm-migrate');
-  const config = configured();
-  const plans = migrationPlans(config);
+  const assessment = upgradeAssessment();
+  const { config: _config, ...output } = assessment;
+  json(output);
+  if (!assessment.ok) process.exitCode = 2;
+}
+
+function applySchemaUpgrade({ config, plans, planId, args, confirmationFlag }) {
+  if (!args[confirmationFlag]) throw new Error('尚未取得用户对表结构升级的明确授权');
+  if (!args['plan-id']) throw new Error('缺少 --plan-id；请先运行 upgrade-check，把升级说明展示给用户并取得授权');
+  if (args['plan-id'] !== planId) throw new Error('升级方案已经变化，原授权失效。请重新运行 upgrade-check 并再次征得用户授权');
   const report = migrationReportPath(args, 'schema-v2-migration');
-  writeJsonAtomic(report, { generated_at: new Date().toISOString(), phase: 'before', current_schema_version: config.schema_version, target_schema_version: DATA_SCHEMA_VERSION, plans });
+  writeJsonAtomic(report, { generated_at: new Date().toISOString(), phase: 'before', plan_id: planId, current_schema_version: config.schema_version, target_schema_version: DATA_SCHEMA_VERSION, plans });
   const created = {};
   for (const type of ['image_text', 'video']) {
     const binding = config.feishu[type];
@@ -286,8 +382,33 @@ async function schemaMigrate(args) {
   const migrated = normalizeConfig({ ...config, schema_version: DATA_SCHEMA_VERSION });
   writeJsonAtomic(configPath(), migrated);
   const after = migrationPlans(migrated);
-  writeJsonAtomic(report, { generated_at: new Date().toISOString(), phase: 'complete', previous_schema_version: config.schema_version, schema_version: DATA_SCHEMA_VERSION, created, plans_before: plans, plans_after: after });
-  json({ ok: true, action: 'schema_migrated', schema_version: DATA_SCHEMA_VERSION, created, report });
+  writeJsonAtomic(report, { generated_at: new Date().toISOString(), phase: 'complete', plan_id: planId, previous_schema_version: config.schema_version, schema_version: DATA_SCHEMA_VERSION, created, plans_before: plans, plans_after: after });
+  return { ok: true, action: 'upgrade_applied', plan_id: planId, schema_version: DATA_SCHEMA_VERSION, created, report, next_authorization: '表结构升级已完成。是否需要预览并修复历史图片？历史修复将单独征求授权。' };
+}
+
+async function upgradeApply(args) {
+  ensureNode();
+  const assessment = upgradeAssessment();
+  if (!assessment.config) throw new Error('未检测到旧版配置；这是首次安装，不应执行升级');
+  if (assessment.mode === 'ready') return json({ ok: true, action: 'already_upgraded', plan_id: assessment.plan_id, message: '当前多维表格已经完成升级，无需重复执行。' });
+  json(applySchemaUpgrade({ config: assessment.config, plans: assessment.plans, planId: assessment.plan_id, args, confirmationFlag: 'confirm-upgrade' }));
+}
+
+async function schemaPlan(args) {
+  ensureNode();
+  const assessment = upgradeAssessment(args);
+  if (!assessment.config) return json(assessment);
+  const { config, plans, plan_id: planId } = assessment;
+  const report = migrationReportPath(args, 'schema-v2-plan');
+  writeJsonAtomic(report, { generated_at: new Date().toISOString(), plan_id: planId, current_schema_version: config.schema_version, target_schema_version: DATA_SCHEMA_VERSION, plans });
+  json({ ok: true, action: 'schema_plan', plan_id: planId, report, plans });
+}
+
+async function schemaMigrate(args) {
+  ensureNode();
+  const assessment = upgradeAssessment();
+  if (!assessment.config) throw new Error('未检测到可升级的旧版配置');
+  json(applySchemaUpgrade({ config: assessment.config, plans: assessment.plans, planId: assessment.plan_id, args, confirmationFlag: 'confirm-migrate' }));
 }
 
 async function repairImages(args) {
@@ -387,7 +508,7 @@ async function archive(args) {
   if (!loaded.config) throw new Error(`Excel 已生成：${backup}；但未配置飞书，请先运行 configure`);
   const configErrors = validateConfig(loaded.config);
   if (configErrors.length) throw new Error(`Excel 已生成：${backup}；飞书配置无效：${configErrors.join('；')}`);
-  if (loaded.config.schema_version !== DATA_SCHEMA_VERSION) throw new Error(`Excel 已生成：${backup}；当前飞书表格仍是 Schema v1。请先运行 schema-plan，确认后执行 schema-migrate --confirm-migrate`);
+  if (loaded.config.schema_version !== DATA_SCHEMA_VERSION) throw new Error(`Excel 已生成：${backup}；当前飞书表格仍需升级。请先运行 upgrade-check，展示升级说明并取得授权后，再按返回的 plan_id 执行 upgrade-apply`);
   const index = loadIndex();
   const localKnown = new Set(index.records.flatMap((record) => record.identities || []));
   const result = { ok: true, backup, written: 0, duplicates: 0, failed: failed.length, bases: {}, media: [], write_errors: [] };
@@ -436,13 +557,15 @@ async function main() {
   const [command, ...rest] = process.argv.slice(2);
   const args = parseArgs(rest);
   if (command === 'doctor') return doctor(args);
+  if (command === 'upgrade-check') return upgradeCheck(args);
+  if (command === 'upgrade-apply') return upgradeApply(args);
   if (command === 'configure') return configure(args);
   if (command === 'schema-plan') return schemaPlan(args);
   if (command === 'schema-migrate') return schemaMigrate(args);
   if (command === 'repair-images') return repairImages(args);
   if (command === 'extract') return extract(args);
   if (command === 'archive') return archive(args);
-  throw new Error('用法：xhs-breakdown.mjs <doctor|configure|schema-plan|schema-migrate|repair-images|extract|archive> [参数]');
+  throw new Error('用法：xhs-breakdown.mjs <doctor|upgrade-check|upgrade-apply|configure|schema-plan|schema-migrate|repair-images|extract|archive> [参数]');
 }
 
 main().catch((error) => fail(error.message));
