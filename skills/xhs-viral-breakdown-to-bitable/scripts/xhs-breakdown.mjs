@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { configPath, indexPath, legacyConfigPath, loadConfig, loadIndex, normalizeConfig, readJson, saveIndex, validateConfig, writeJsonAtomic } from './lib/config.mjs';
 import { identities, selectPending } from './lib/dedupe.mjs';
-import { extractOne, extractUrls } from './lib/xhs.mjs';
+import { extractOne, extractUrls, profileIdFromUrl } from './lib/xhs.mjs';
 import { batchCreate, createBase, createField, createTable, discoverLark, downloadAttachment, getVisibleFields, inspectLarkAuth, listFields, listRecordDetails, listRecords, listTables, listViews, renameTable, setVisibleFields, updateRecord, uploadAttachments, valuesAsStrings } from './lib/lark.mjs';
 import { buildMigrationPlan, classifyRepairFailure, DATA_SCHEMA_VERSION, fieldObjects, MIGRATION_FIELDS, recordField, recordObjects } from './lib/migration.mjs';
 import { downloadFreshMedia } from './lib/media.mjs';
@@ -51,6 +51,8 @@ const BLOGGER_FIELD_SCHEMA = [
   ] },
   { name: '采集时间', type: 'datetime', style: { format: 'yyyy-MM-dd HH:mm' } },
 ];
+const BLOGGER_FIELDS = BLOGGER_FIELD_SCHEMA.filter((field) => field.type !== 'attachment').map((field) => field.name);
+const BLOGGER_EXPORT_FIELDS = BLOGGER_FIELD_SCHEMA.map((field) => field.name);
 
 function json(value) { process.stdout.write(`${JSON.stringify(value, null, 2)}\n`); }
 function fail(message, code = 1) { json({ ok: false, error: message }); process.exit(code); }
@@ -86,7 +88,11 @@ function bindingReady(binding) {
 
 function analysisErrors(item) {
   if (item.status !== 'success') return [];
-  const required = item.type === 'video' ? ['viral_breakdown', 'reusable_tactics'] : ['body_summary', 'cover_analysis', 'interaction_drivers', 'viral_reasons', 'reusable_tactics'];
+  const required = item.type === 'blogger_profile'
+    ? ['avatar_style', 'content_positioning', 'persona_tags', 'audience_profile', 'value_proposition', 'differentiation', 'data_limitations', 'collection_status']
+    : item.type === 'video'
+      ? ['viral_breakdown', 'reusable_tactics']
+      : ['body_summary', 'cover_analysis', 'interaction_drivers', 'viral_reasons', 'reusable_tactics'];
   return required.filter((key) => !item.analysis?.[key]).map((key) => `${item.note_id || item.original_url} 缺少 analysis.${key}`);
 }
 
@@ -97,11 +103,57 @@ function duration(value) {
   return minutes ? `${minutes}分${String(seconds).padStart(2, '0')}秒` : `${seconds}秒`;
 }
 
+function textValue(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).join('、');
+  return value === null || value === undefined ? '' : String(value);
+}
+
+function topPostValue(post, key) {
+  if (!post || typeof post !== 'object') return '';
+  if (key === 'title') return textValue(post.title);
+  const count = post.public_interaction_data ?? post.liked_count;
+  return count === null || count === undefined || count === '' ? '' : textValue(count);
+}
+
+function bloggerFieldValues(item) {
+  const d = item.data || {};
+  const a = item.analysis || {};
+  const posts = Array.isArray(a.top_posts) && a.top_posts.length ? a.top_posts : (d.top_visible_notes || []);
+  return {
+    账号名称: d.nickname || '', 平台类型: '小红书', 小红书号: d.red_id || '', 主页链接: d.canonical_profile_url || item.final_url || item.original_url,
+    '简介/签名': d.description || '', 头像风格: textValue(a.avatar_style), 内容定位: textValue(a.content_positioning), 人设标签: textValue(a.persona_tags),
+    受众画像: textValue(a.audience_profile), 价值主张: textValue(a.value_proposition), 差异化点: textValue(a.differentiation),
+    粉丝总量: d.follower_count, 获赞与收藏总量: d.total_likes_collects, '笔记/作品数': textValue(a.note_count || (d.visible_note_count ? `公开页首屏可见${d.visible_note_count}条` : '')),
+    更新频率: textValue(a.update_frequency), 选题方向: textValue(a.topic_directions), 内容类型: textValue(a.content_types), 内容形式: textValue(a.content_formats),
+    高频关键词: textValue(a.high_frequency_keywords), 常带话题: textValue(a.common_topics), 发布时段: textValue(a.publishing_times), 内容风格: textValue(a.content_style),
+    封面风格: textValue(a.cover_style), 封面配色: textValue(a.cover_palette), 封面字体风格: textValue(a.cover_font_style), 封面元素: textValue(a.cover_elements),
+    标题写法: textValue(a.title_patterns), 正文结构: textValue(a.body_structure), 开头套路: textValue(a.opening_patterns), 结尾套路: textValue(a.ending_patterns),
+    高点赞标题1: topPostValue(posts[0], 'title'), 公开互动数据1: topPostValue(posts[0], 'interaction'),
+    高点赞标题2: topPostValue(posts[1], 'title'), 公开互动数据2: topPostValue(posts[1], 'interaction'),
+    高点赞标题3: topPostValue(posts[2], 'title'), 公开互动数据3: topPostValue(posts[2], 'interaction'),
+    高点赞共性: textValue(a.top_post_patterns), 变现方式: textValue(a.monetization), 观察到的品牌内容: textValue(a.brand_content),
+    公开引流方式: textValue(a.traffic_methods), 可复用元素: textValue(a.reusable_elements), 数据限制: textValue(a.data_limitations),
+    采集状态: textValue(a.collection_status), 采集时间: Date.now(),
+  };
+}
+
+function bloggerRow(item, { exportRow = false } = {}) {
+  const values = bloggerFieldValues(item);
+  if (!exportRow) return BLOGGER_FIELDS.map((field) => values[field] ?? '');
+  const a = item.analysis || {};
+  return BLOGGER_EXPORT_FIELDS.map((field) => {
+    if (field === '头像截图') return item.data?.avatar_url || '';
+    if (field === '主页截图') return a.homepage_screenshot_path || '';
+    return values[field] ?? '';
+  });
+}
+
 function rowFor(item) {
   const d = item.data || {};
   const m = d.metrics || {};
   const a = item.analysis || {};
   const tracking = [item.note_id || '', '待处理', '', new Date().toISOString().replace('T', ' ').slice(0, 19)];
+  if (item.type === 'blogger_profile') return bloggerRow(item);
   if (item.type === 'video') return [d.title, item.original_url, d.cover_url, d.author, duration(d.duration_seconds), m.liked, m.collected, m.commented, m.shared, d.description, d.transcript || '未获取字幕', a.viral_breakdown, a.reusable_tactics, ...tracking];
   return [d.title, a.body_summary, item.original_url, (d.topics || []).map((topic) => `#${String(topic).replace(/^#/, '')}`).join(' '), d.cover_url, m.liked, m.collected, m.commented, m.shared, (d.image_urls || []).slice(1).join('\n'), a.cover_analysis, a.interaction_drivers, a.viral_reasons, a.reusable_tactics, ...tracking];
 }
@@ -167,7 +219,101 @@ async function archiveMedia({ item, recordId, record = null, binding, identity, 
   return { status, uploaded, expected: downloaded.expected, errors: messages };
 }
 
+function nonEmptyFields(values) {
+  return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== '' && value !== null && value !== undefined));
+}
+
+function bloggerRecordIndex(records) {
+  const byProfileId = new Map();
+  const byRedId = new Map();
+  for (const record of records) {
+    const recordId = String(record.record_id || record.recordId || '');
+    if (!recordId) continue;
+    for (const value of valuesAsStrings(record.fields?.['主页链接'])) {
+      const profileId = profileIdFromUrl(value);
+      if (profileId) byProfileId.set(profileId, record);
+    }
+    for (const value of valuesAsStrings(record.fields?.['小红书号'])) if (value) byRedId.set(String(value), record);
+  }
+  return { byProfileId, byRedId };
+}
+
+function matchingBloggerRecord(index, item) {
+  return index.byProfileId.get(String(item.profile_id || item.data?.user_id || ''))
+    || index.byRedId.get(String(item.data?.red_id || ''))
+    || null;
+}
+
+async function archiveBloggerAttachments({ item, record, binding, identity, tempRoot, inputDir }) {
+  const recordId = String(record.record_id || record.recordId);
+  const existingAvatar = new Set(attachmentNames(record.fields?.['头像截图']));
+  const existingHomepage = new Set(attachmentNames(record.fields?.['主页截图']));
+  const errors = [];
+  let uploaded = 0;
+  if (item.data?.avatar_url && existingAvatar.size === 0) {
+    const downloaded = await downloadFreshMedia(item, path.join(tempRoot, `blogger-${item.profile_id || recordId}`));
+    if (downloaded.files.length) {
+      try { uploadAttachments(binding, identity, recordId, '头像截图', downloaded.files.slice(0, 1)); uploaded += 1; }
+      catch (error) { errors.push(`头像上传失败：${error.message}`); }
+    } else errors.push(...downloaded.errors.map((error) => `头像下载失败：${error.reason}`));
+  }
+  const rawScreenshot = item.analysis?.homepage_screenshot_path || item.data?.homepage_screenshot_path || '';
+  if (rawScreenshot) {
+    const screenshot = path.isAbsolute(rawScreenshot) ? rawScreenshot : path.resolve(inputDir, rawScreenshot);
+    if (!fs.existsSync(screenshot)) errors.push(`主页截图文件不存在：${rawScreenshot}`);
+    else if (existingHomepage.size === 0) {
+      try { uploadAttachments(binding, identity, recordId, '主页截图', [screenshot]); uploaded += 1; }
+      catch (error) { errors.push(`主页截图上传失败：${error.message}`); }
+    }
+  }
+  return { status: errors.length ? uploaded ? '部分成功' : '附件缺失' : '成功', uploaded, errors };
+}
+
+async function archiveBloggers({ items, binding, identity, result, index, localKnown, tempRoot, inputDir }) {
+  const fields = ['账号名称', '小红书号', '主页链接', '头像截图', '主页截图'];
+  let records = recordObjects(listRecordDetails(binding, identity, fields));
+  let remoteIndex = bloggerRecordIndex(records);
+  const pending = items.filter((item) => !matchingBloggerRecord(remoteIndex, item));
+  result.duplicates += items.length - pending.length;
+  for (let offset = 0; offset < pending.length; offset += 200) {
+    batchCreate(binding, identity, BLOGGER_FIELDS, pending.slice(offset, offset + 200).map((item) => bloggerRow(item)));
+  }
+  if (pending.length) {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      records = recordObjects(listRecordDetails(binding, identity, fields));
+      remoteIndex = bloggerRecordIndex(records);
+      if (pending.every((item) => matchingBloggerRecord(remoteIndex, item)) || attempt === 3) break;
+      await wait(500 * (attempt + 1));
+    }
+  }
+  const recordIdsByProfile = new Map();
+  for (const item of items) {
+    const record = matchingBloggerRecord(remoteIndex, item);
+    if (!record) {
+      result.ok = false;
+      result.write_errors.push({ type: 'blogger_profile', profile_id: item.profile_id, reason: '博主记录已写入，但无法定位 record_id' });
+      continue;
+    }
+    const recordId = String(record.record_id || record.recordId);
+    const profileId = String(item.profile_id || item.data?.user_id || '');
+    if (profileId) recordIdsByProfile.set(profileId, recordId);
+    updateRecord(binding, identity, recordId, nonEmptyFields(bloggerFieldValues(item)));
+    const media = await archiveBloggerAttachments({ item, record, binding, identity, tempRoot, inputDir });
+    result.media.push({ type: 'blogger_profile', record_id: recordId, profile_id: profileId, ...media });
+    if (media.errors.length) result.ok = false;
+    const ids = identities(item);
+    ids.forEach((id) => localKnown.add(id));
+    if (!index.records.some((entry) => (entry.identities || []).some((id) => ids.includes(id)))) {
+      index.records.push({ type: 'blogger_profile', profile_id: profileId, identities: ids, archived_at: new Date().toISOString() });
+    }
+  }
+  result.written += pending.length;
+  result.bases.blogger_profile = binding.base_url;
+  return recordIdsByProfile;
+}
+
 function xlsxRows(items, type) {
+  if (type === 'blogger_profile') return [BLOGGER_EXPORT_FIELDS, ...items.filter((item) => item.type === type).map((item) => bloggerRow(item, { exportRow: true }))];
   const fields = type === 'video' ? VIDEO_FIELDS : IMAGE_FIELDS;
   return [fields, ...items.filter((item) => item.type === type).map(rowFor)];
 }
@@ -774,6 +920,7 @@ async function archive(args) {
   writeXlsx(backup, {
     图文: xlsxRows(successful, 'image_text'),
     视频: xlsxRows(successful, 'video'),
+    博主主页: xlsxRows(successful, 'blogger_profile'),
     失败: [['原始链接', '最终链接', '阶段', '原因'], ...failed.map((item) => [item.original_url, item.final_url, item.stage, item.reason])],
   });
   if (args['no-write']) return json({ ok: true, dry_run: true, backup, records_ready: successful.length, failed: failed.length });
@@ -784,9 +931,30 @@ async function archive(args) {
   if (loaded.config.schema_version !== DATA_SCHEMA_VERSION) throw new Error(`Excel 已生成：${backup}；当前飞书表格仍需升级。请先运行 upgrade-check，展示升级说明并取得授权后，再按返回的 plan_id 执行 upgrade-apply`);
   const index = loadIndex();
   const localKnown = new Set(index.records.flatMap((record) => record.identities || []));
-  const result = { ok: true, backup, written: 0, duplicates: 0, failed: failed.length, bases: {}, media: [], write_errors: [] };
+  const result = { ok: true, backup, written: 0, duplicates: 0, linked_to_blogger: 0, unlinked_notes: [], failed: failed.length, bases: {}, media: [], write_errors: [] };
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-new-media-'));
-  try { for (const type of ['image_text', 'video']) {
+  try {
+    const bloggers = successful.filter((item) => item.type === 'blogger_profile');
+    const needsBloggerRecords = bloggers.length > 0 || successful.some((item) => ['image_text', 'video'].includes(item.type) && item.data?.author_id);
+    let bloggerRecords = new Map();
+    if (needsBloggerRecords) {
+      try {
+        bloggerRecords = bloggerRecordIndex(recordObjects(listRecordDetails(loaded.config.feishu.blogger, loaded.config.feishu.identity, ['小红书号', '主页链接']))).byProfileId;
+      } catch (error) {
+        result.ok = false;
+        result.write_errors.push({ type: 'blogger_profile', reason: `读取博主主页表失败：${error.message}` });
+      }
+    }
+    if (bloggers.length) {
+      try {
+        await archiveBloggers({ items: bloggers, binding: loaded.config.feishu.blogger, identity: loaded.config.feishu.identity, result, index, localKnown, tempRoot, inputDir: path.dirname(path.resolve(args.input)) });
+        bloggerRecords = bloggerRecordIndex(recordObjects(listRecordDetails(loaded.config.feishu.blogger, loaded.config.feishu.identity, ['小红书号', '主页链接']))).byProfileId;
+      } catch (error) {
+        result.ok = false;
+        result.write_errors.push({ type: 'blogger_profile', reason: error.message });
+      }
+    }
+    for (const type of ['image_text', 'video']) {
     const binding = loaded.config.feishu[type];
     const fields = type === 'video' ? VIDEO_FIELDS : IMAGE_FIELDS;
     const candidates = successful.filter((item) => item.type === type);
@@ -809,6 +977,26 @@ async function archive(args) {
         result.media.push({ type, record_id: recordId, note_id: item.note_id, ...media });
         if (!['成功', '无图片'].includes(media.status)) result.ok = false;
       }
+      for (const item of candidates) {
+        const authorId = String(item.data?.author_id || '');
+        const blogger = authorId ? bloggerRecords.get(authorId) : null;
+        if (!blogger) {
+          result.unlinked_notes.push({ type, note_id: item.note_id, reason: authorId ? '博主主页表中没有匹配的 user_id' : '笔记未提取到 author_id' });
+          continue;
+        }
+        const record = await findCreatedRecord(binding, loaded.config.feishu.identity, type, item);
+        if (!record) {
+          result.unlinked_notes.push({ type, note_id: item.note_id, reason: '未定位到笔记记录，无法写入所属博主' });
+          continue;
+        }
+        try {
+          updateRecord(binding, loaded.config.feishu.identity, String(record.record_id || record.recordId), { 所属博主: [{ id: String(blogger.record_id || blogger.recordId) }] });
+          result.linked_to_blogger += 1;
+        } catch (error) {
+          result.ok = false;
+          result.write_errors.push({ type, note_id: item.note_id, reason: `所属博主关联失败：${error.message}` });
+        }
+      }
       for (const item of pending) {
         const ids = identities(item);
         ids.forEach((id) => localKnown.add(id));
@@ -820,7 +1008,8 @@ async function archive(args) {
       result.ok = false;
       result.write_errors.push({ type, reason: error.message });
     }
-  }} finally { fs.rmSync(tempRoot, { recursive: true, force: true }); }
+    }
+  } finally { fs.rmSync(tempRoot, { recursive: true, force: true }); }
   saveIndex(index);
   json(result);
   if (!result.ok) process.exitCode = 2;

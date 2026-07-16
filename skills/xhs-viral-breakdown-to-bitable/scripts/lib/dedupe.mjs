@@ -1,5 +1,5 @@
 export function identities(item) {
-  return [item?.note_id, item?.original_url, item?.final_url]
+  return [item?.note_id, item?.profile_id, item?.data?.user_id, item?.data?.canonical_profile_url, item?.original_url, item?.final_url]
     .filter(Boolean)
     .map(String);
 }
