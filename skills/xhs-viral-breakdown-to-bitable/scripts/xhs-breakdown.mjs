@@ -6,8 +6,8 @@ import path from 'node:path';
 import { configPath, indexPath, legacyConfigPath, loadConfig, loadIndex, normalizeConfig, readJson, saveIndex, validateConfig, writeJsonAtomic } from './lib/config.mjs';
 import { identities, selectPending } from './lib/dedupe.mjs';
 import { extractOne, extractUrls } from './lib/xhs.mjs';
-import { batchCreate, createBase, createField, discoverLark, getVisibleFields, inspectLarkAuth, listFields, listRecordDetails, listRecords, setVisibleFields, updateRecord, uploadAttachments, valuesAsStrings } from './lib/lark.mjs';
-import { buildMigrationPlan, classifyRepairFailure, DATA_SCHEMA_VERSION, MIGRATION_FIELDS, recordField, recordObjects } from './lib/migration.mjs';
+import { batchCreate, createBase, createField, createTable, discoverLark, downloadAttachment, getVisibleFields, inspectLarkAuth, listFields, listRecordDetails, listRecords, listTables, listViews, renameTable, setVisibleFields, updateRecord, uploadAttachments, valuesAsStrings } from './lib/lark.mjs';
+import { buildMigrationPlan, classifyRepairFailure, DATA_SCHEMA_VERSION, fieldObjects, MIGRATION_FIELDS, recordField, recordObjects } from './lib/migration.mjs';
 import { downloadFreshMedia } from './lib/media.mjs';
 import { extractionOutcome } from './lib/outcome.mjs';
 import { writeXlsx } from './lib/xlsx.mjs';
@@ -25,6 +25,31 @@ const VIDEO_FIELD_SCHEMA = [
   { name: '视频时长', type: 'text' }, { name: '点赞数', type: 'number', style: { type: 'plain', precision: 0, thousands_separator: true } }, { name: '收藏数', type: 'number', style: { type: 'plain', precision: 0, thousands_separator: true } }, { name: '评论数', type: 'number', style: { type: 'plain', precision: 0, thousands_separator: true } },
   { name: '分享数', type: 'number', style: { type: 'plain', precision: 0, thousands_separator: true } }, { name: '正文', type: 'text' }, { name: '口播文案（原始字幕）', type: 'text' },
   { name: '爆款拆解', type: 'text' }, { name: '可复制部分', type: 'text' }, ...MIGRATION_FIELDS.video,
+];
+const BLOGGER_FIELD_SCHEMA = [
+  { name: '账号名称', type: 'text' }, { name: '平台类型', type: 'text' }, { name: '小红书号', type: 'text' },
+  { name: '主页链接', type: 'text', style: { type: 'url' } }, { name: '简介/签名', type: 'text' },
+  { name: '头像截图', type: 'attachment' }, { name: '头像风格', type: 'text' }, { name: '主页截图', type: 'attachment' },
+  { name: '内容定位', type: 'text' }, { name: '人设标签', type: 'text' }, { name: '受众画像', type: 'text' },
+  { name: '价值主张', type: 'text' }, { name: '差异化点', type: 'text' },
+  { name: '粉丝总量', type: 'number', style: { type: 'plain', precision: 0, thousands_separator: true } },
+  { name: '获赞与收藏总量', type: 'number', style: { type: 'plain', precision: 0, thousands_separator: true } },
+  { name: '笔记/作品数', type: 'text' }, { name: '更新频率', type: 'text' },
+  { name: '选题方向', type: 'text' }, { name: '内容类型', type: 'text' }, { name: '内容形式', type: 'text' },
+  { name: '高频关键词', type: 'text' }, { name: '常带话题', type: 'text' }, { name: '发布时段', type: 'text' },
+  { name: '内容风格', type: 'text' }, { name: '封面风格', type: 'text' }, { name: '封面配色', type: 'text' },
+  { name: '封面字体风格', type: 'text' }, { name: '封面元素', type: 'text' }, { name: '标题写法', type: 'text' },
+  { name: '正文结构', type: 'text' }, { name: '开头套路', type: 'text' }, { name: '结尾套路', type: 'text' },
+  { name: '高点赞标题1', type: 'text' }, { name: '公开互动数据1', type: 'text' },
+  { name: '高点赞标题2', type: 'text' }, { name: '公开互动数据2', type: 'text' },
+  { name: '高点赞标题3', type: 'text' }, { name: '公开互动数据3', type: 'text' },
+  { name: '高点赞共性', type: 'text' }, { name: '变现方式', type: 'text' },
+  { name: '观察到的品牌内容', type: 'text' }, { name: '公开引流方式', type: 'text' },
+  { name: '可复用元素', type: 'text' }, { name: '数据限制', type: 'text' },
+  { name: '采集状态', type: 'select', multiple: false, options: [
+    { name: '基础分析完成' }, { name: '完整分析完成' }, { name: '部分字段缺失' }, { name: '采集失败' },
+  ] },
+  { name: '采集时间', type: 'datetime', style: { format: 'yyyy-MM-dd HH:mm' } },
 ];
 
 function json(value) { process.stdout.write(`${JSON.stringify(value, null, 2)}\n`); }
@@ -208,29 +233,34 @@ async function configure(args) {
     return json({ ok: true, action: 'bound', path: configPath() });
   }
   if (args.create || args['create-test']) {
-    if (!args['confirm-create']) throw new Error('创建飞书库前必须取得用户明确同意，并传入 --confirm-create');
+    if (!args['confirm-create']) throw new Error('创建飞书内容工作台前必须取得用户明确同意，并传入 --confirm-create');
     const suffix = args['create-test'] ? `测试-${new Date().toISOString().slice(0, 10)}` : '';
     const identity = args.identity === 'user' ? 'user' : 'bot';
     const existing = loadConfig({ migrate: false }).config;
-    if (existing && bindingReady(existing.feishu.image_text) && bindingReady(existing.feishu.video)) {
-      return json({ ok: true, action: 'already_configured', path: configPath(), bases: { image_text: existing.feishu.image_text, video: existing.feishu.video } });
+    if (existing && existing.schema_version === DATA_SCHEMA_VERSION && bindingReady(existing.feishu.image_text) && bindingReady(existing.feishu.video) && bindingReady(existing.feishu.blogger)) {
+      return json({ ok: true, action: 'already_configured', path: configPath(), workspace: { image_text: existing.feishu.image_text, video: existing.feishu.video, blogger: existing.feishu.blogger } });
     }
-    const imageText = bindingReady(existing?.feishu?.image_text)
-      ? existing.feishu.image_text
-      : createBase({ name: `小红书图文爆款拆解库${suffix}`, fields: IMAGE_FIELD_SCHEMA, identity });
-    const partial = normalizeConfig({ schema_version: DATA_SCHEMA_VERSION, initialized: false, timezone: 'Asia/Shanghai', feishu: { identity, image_text: imageText, video: existing?.feishu?.video || {} } });
+    if (existing && bindingReady(existing?.feishu?.image_text) && bindingReady(existing?.feishu?.video)) {
+      throw new Error('检测到旧版双库配置。请先运行 upgrade-check，向用户说明合并方案并取得授权后执行 upgrade-apply');
+    }
+    const imageText = createBase({ name: `小红书内容资产库${suffix}`, fields: IMAGE_FIELD_SCHEMA, identity });
+    renameTable(imageText, identity, '图文笔记');
+    imageText.table_name = '图文笔记';
+    const partial = normalizeConfig({ schema_version: 2, initialized: false, timezone: 'Asia/Shanghai', feishu: { identity, image_text: imageText } });
     writeJsonAtomic(configPath(), partial);
     let video;
+    let blogger;
     try {
-      video = bindingReady(existing?.feishu?.video)
-        ? existing.feishu.video
-        : createBase({ name: `小红书视频爆款拆解库${suffix}`, fields: VIDEO_FIELD_SCHEMA, identity });
+      blogger = createTable({ baseToken: imageText.base_token, baseUrl: imageText.base_url, baseName: imageText.base_name, name: '博主主页', fields: BLOGGER_FIELD_SCHEMA, identity });
+      video = createTable({ baseToken: imageText.base_token, baseUrl: imageText.base_url, baseName: imageText.base_name, name: '视频笔记', fields: VIDEO_FIELD_SCHEMA, identity });
+      createField(imageText, identity, { type: 'link', name: '所属博主', link_table: blogger.table_id });
+      createField(video, identity, { type: 'link', name: '所属博主', link_table: blogger.table_id });
     } catch (error) {
-      throw new Error(`图文库已创建并保存到本地配置（${imageText.base_url}），视频库创建失败：${error.message}。修复飞书授权后用同一命令重试，程序会复用已创建的图文库。`);
+      throw new Error(`内容工作台已开始创建并保存到本地配置（${imageText.base_url}），后续数据表创建失败：${error.message}。修复飞书授权后运行 upgrade-check 生成恢复方案。`);
     }
-    const config = normalizeConfig({ schema_version: DATA_SCHEMA_VERSION, initialized: true, timezone: 'Asia/Shanghai', feishu: { identity, image_text: imageText, video } });
+    const config = normalizeConfig({ schema_version: DATA_SCHEMA_VERSION, initialized: true, timezone: 'Asia/Shanghai', feishu: { identity, image_text: imageText, video, blogger } });
     writeJsonAtomic(configPath(), config);
-    return json({ ok: true, action: args['create-test'] ? 'created_test_bases' : 'created_bases', path: configPath(), bases: { image_text: imageText, video } });
+    return json({ ok: true, action: args['create-test'] ? 'created_test_workspace' : 'created_workspace', path: configPath(), workspace: { image_text: imageText, video, blogger } });
   }
   throw new Error('configure 需要 --migrate、--bind、--create 或 --create-test');
 }
@@ -264,7 +294,7 @@ function stable(value) {
   return value;
 }
 
-function upgradePlanId(config, plans) {
+function upgradePlanId(config, plans, workspace) {
   const target = {
     schema_version: DATA_SCHEMA_VERSION,
     bindings: Object.fromEntries(['image_text', 'video'].map((type) => [type, {
@@ -273,6 +303,7 @@ function upgradePlanId(config, plans) {
       view_id: config.feishu[type].view_id,
     }])),
     plans,
+    workspace,
   };
   return crypto.createHash('sha256').update(JSON.stringify(stable(target))).digest('hex').slice(0, 16);
 }
@@ -285,33 +316,86 @@ function existingUpgradeConfig() {
   return null;
 }
 
-function plansNeedChanges(config, plans) {
+function tableObjects(value, result = []) {
+  if (!value || typeof value !== 'object') return result;
+  if ((value.id || value.table_id) && (value.name || value.table_name)) result.push(value);
+  if (Array.isArray(value)) value.forEach((item) => tableObjects(item, result));
+  else Object.values(value).forEach((item) => tableObjects(item, result));
+  const seen = new Set();
+  return result.filter((item) => {
+    const id = String(item.id || item.table_id);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+function workspacePlan(config) {
+  const target = config.feishu.image_text;
+  const tables = tableObjects(listTables(target.base_token, config.feishu.identity));
+  const byName = (names) => tables.find((table) => names.includes(String(table.name || table.table_name)));
+  const imageTable = tables.find((table) => String(table.id || table.table_id) === target.table_id);
+  const imageTableName = String(imageTable?.name || imageTable?.table_name || target.table_name);
+  const existingVideo = config.feishu.video.base_token === target.base_token
+    ? tables.find((table) => String(table.id || table.table_id) === config.feishu.video.table_id)
+    : byName(['视频笔记']);
+  const existingBlogger = bindingReady(config.feishu.blogger) && config.feishu.blogger.base_token === target.base_token
+    ? tables.find((table) => String(table.id || table.table_id) === config.feishu.blogger.table_id)
+    : byName(['博主主页', '博主分析页']);
+  return {
+    target_base_token: target.base_token,
+    target_base_url: target.base_url,
+    source_video_base_token: config.feishu.video.base_token,
+    source_video_table_id: config.feishu.video.table_id,
+    image_table_id: target.table_id,
+    image_table_name: imageTableName,
+    rename_image_table: imageTableName !== '图文笔记',
+    video_already_in_target: Boolean(existingVideo),
+    target_video_table: existingVideo ? { id: String(existingVideo.id || existingVideo.table_id), name: String(existingVideo.name || existingVideo.table_name) } : null,
+    copy_video_records: config.feishu.video.base_token !== target.base_token,
+    create_video_table: !existingVideo,
+    create_blogger_table: !existingBlogger,
+    blogger_table: existingBlogger ? { id: String(existingBlogger.id || existingBlogger.table_id), name: String(existingBlogger.name || existingBlogger.table_name) } : null,
+    preserve_source_video_base: config.feishu.video.base_token !== target.base_token,
+  };
+}
+
+function plansNeedChanges(config, plans, workspace) {
   if (config.schema_version !== DATA_SCHEMA_VERSION) return true;
+  if (workspace.rename_image_table || workspace.create_video_table || workspace.create_blogger_table || workspace.copy_video_records) return true;
+  if (config.feishu.video.base_token !== config.feishu.image_text.base_token) return true;
+  if (!bindingReady(config.feishu.blogger)) return true;
   return Object.values(plans).some((plan) => plan.missing_fields.length > 0
     || JSON.stringify(plan.visible_fields_before) !== JSON.stringify(plan.visible_fields_after));
 }
 
-function customerUpdateMessage(plans) {
+function customerUpdateMessage(plans, workspace) {
   const imageAdded = plans.image_text.missing_fields.map((field) => field.name);
   const videoAdded = plans.video.missing_fields.map((field) => field.name);
   return [
-    '检测到你正在从旧版本升级。',
+    '检测到你正在更新小红书爆款拆解 Skill。',
     '',
-    '这次更新主要解决图片链接失效和历史图片难以修复的问题：',
-    '- 图文笔记保存封面和完整图片附件；',
-    '- 视频笔记保存真实封面附件；',
-    '- 新增图片归档状态和错误记录；',
-    '- 支持根据原笔记链接修复历史图片。',
+    '这次更新会把分散的图文库和视频库整理成一个“小红书内容工作台”。以后不用在两个多维表之间来回切换，也可以直接按博主汇总内容、做筛选和看板。',
     '',
-    '原表需要进行以下升级：',
+    '升级后你会得到：',
+    '- 图文笔记、视频笔记、博主主页三张数据表；',
+    '- 图文和视频都可以通过“所属博主”关联到博主主页；',
+    '- 原有视频记录和封面附件复制到统一工作台；',
+    '- 后续新增字段、统计和仪表盘都在同一个多维表中维护。',
+    '',
+    '本次准备执行：',
+    `- 将原图文表${workspace.rename_image_table ? '改名为“图文笔记”' : '保持为“图文笔记”'}；`,
+    `- ${workspace.create_video_table ? '新建“视频笔记”并复制原视频库数据与附件' : '复用已有“视频笔记”'}；`,
+    `- ${workspace.create_blogger_table ? '新建“博主主页”' : `复用已有“${workspace.blogger_table?.name || '博主主页'}”`}；`,
+    '- 为图文和视频表增加“所属博主”关联字段；',
     `- 图文库新增：${imageAdded.length ? imageAdded.join('、') : '无需新增字段'}；`,
     `- 视频库新增：${videoAdded.length ? videoAdded.join('、') : '无需新增字段'}；`,
-    '- 原“封面”和“图片”链接字段继续保留，但不再作为主要展示字段；',
-    '- 原有数据和自定义字段不会被删除或覆盖。',
     '',
-    '准备执行：备份当前结构 → 只新增缺失字段 → 增量调整默认视图 → 生成升级报告。',
+    '需要的飞书权限：读取现有表和记录；创建/改名数据表与字段；读取并下载原附件；向新表写入记录和上传附件；更新本机绑定配置。',
     '',
-    '是否授权我升级现有多维表格结构？本次授权不包含历史图片修复。',
+    '不会做的事情：不会删除原视频库、旧数据或自定义字段；不会登录小红书；不会执行发布、点赞、评论等账号操作。',
+    '',
+    '是否授权我按以上方案合并现有多维表格？本次授权仅用于这次迁移，不包含删除旧库或历史图片修复。',
   ].join('\n');
 }
 
@@ -328,9 +412,39 @@ function upgradeAssessment(args = {}) {
   }
   const errors = validateConfig(candidate.config);
   if (errors.length) return { ok: false, action: 'upgrade_check', mode: 'blocked', source: candidate.source, errors };
+  const lark = discoverLark();
+  const identity = candidate.config.feishu.identity;
+  const auth = inspectLarkAuth(lark, identity);
+  if (!lark || !auth.ready) {
+    const userIdentity = identity === 'user';
+    return {
+      ok: true,
+      action: 'upgrade_check',
+      mode: 'authorization_required',
+      source: candidate.source,
+      identity,
+      authorization: {
+        required: true,
+        scope: 'feishu_base_access',
+        command: userIdentity ? 'lark-cli auth login --domain base --no-wait --json' : null,
+        next_check: '完成授权后重新运行 upgrade-check',
+      },
+      customer_message: [
+        '新版会把原来分散的图文库和视频库合并成一个小红书内容工作台。开始检查和迁移前，需要先确认飞书访问权限。',
+        '',
+        '需要的权限包括：读取现有多维表和附件；创建/改名数据表与字段；复制记录并上传附件。不会删除原库，也不会申请小红书登录权限。',
+        '',
+        userIdentity
+          ? '接下来我会发起飞书 Base 最小范围授权。请在飞书页面确认，完成后我会重新检查，并把具体迁移方案发给你确认。'
+          : '当前配置使用飞书应用身份，但应用的 Base 权限尚未就绪。请先在飞书开发者后台为该应用开通多维表格读写及附件相关权限，完成后再继续。',
+      ].join('\n'),
+      auth,
+    };
+  }
   const plans = migrationPlans(candidate.config);
-  const planId = upgradePlanId(candidate.config, plans);
-  const needsUpgrade = plansNeedChanges(candidate.config, plans);
+  const workspace = workspacePlan(candidate.config);
+  const planId = upgradePlanId(candidate.config, plans, workspace);
+  const needsUpgrade = plansNeedChanges(candidate.config, plans, workspace);
   const result = {
     ok: true,
     action: 'upgrade_check',
@@ -340,13 +454,15 @@ function upgradeAssessment(args = {}) {
     target_schema_version: DATA_SCHEMA_VERSION,
     plan_id: planId,
     plans,
+    workspace,
     authorization: needsUpgrade ? {
       required: true,
-      scope: 'schema_only',
-      excludes: ['历史图片修复'],
+      scope: 'workspace_consolidation',
+      includes: ['表改名', '新建数据表', '复制视频记录和附件', '新增所属博主关联', '更新本机绑定配置'],
+      excludes: ['删除原视频库', '删除旧数据', '历史图片修复', '小红书登录或互动'],
       apply_command: `upgrade-apply --plan-id ${planId} --confirm-upgrade`,
     } : { required: false },
-    customer_message: needsUpgrade ? customerUpdateMessage(plans) : '当前多维表格已经完成升级，可以直接使用新版 Skill。',
+    customer_message: needsUpgrade ? customerUpdateMessage(plans, workspace) : '当前内容工作台已经完成升级，可以直接使用新版 Skill。',
   };
   if (args['output-dir']) {
     result.report = migrationReportPath(args, 'upgrade-check');
@@ -357,18 +473,133 @@ function upgradeAssessment(args = {}) {
 
 async function upgradeCheck(args) {
   ensureNode();
-  const assessment = upgradeAssessment();
+  const assessment = upgradeAssessment(args);
   const { config: _config, ...output } = assessment;
   json(output);
   if (!assessment.ok) process.exitCode = 2;
 }
 
-function applySchemaUpgrade({ config, plans, planId, args, confirmationFlag }) {
-  if (!args[confirmationFlag]) throw new Error('尚未取得用户对表结构升级的明确授权');
-  if (!args['plan-id']) throw new Error('缺少 --plan-id；请先运行 upgrade-check，把升级说明展示给用户并取得授权');
-  if (args['plan-id'] !== planId) throw new Error('升级方案已经变化，原授权失效。请重新运行 upgrade-check 并再次征得用户授权');
-  const report = migrationReportPath(args, 'schema-v2-migration');
-  writeJsonAtomic(report, { generated_at: new Date().toISOString(), phase: 'before', plan_id: planId, current_schema_version: config.schema_version, target_schema_version: DATA_SCHEMA_VERSION, plans });
+function bindingFromTable(base, table, tableName) {
+  return {
+    base_name: base.base_name,
+    base_token: base.base_token,
+    base_url: base.base_url,
+    table_name: tableName || table.name,
+    table_id: String(table.id || table.table_id),
+    view_id: String(table.view_id || table.default_view_id || ''),
+  };
+}
+
+function ensureViewId(binding, identity) {
+  if (binding.view_id) return binding;
+  const response = listViews(binding, identity);
+  const data = response?.data || response;
+  const view = data?.views?.[0] || data?.items?.[0];
+  if (!view?.id) throw new Error(`无法读取数据表 ${binding.table_name || binding.table_id} 的默认视图`);
+  return { ...binding, view_id: String(view.id) };
+}
+
+function recordRowsFromPages(pages) {
+  const records = [];
+  for (const page of pages) {
+    const data = page?.data || page;
+    const fields = data?.fields || [];
+    const rows = data?.data || [];
+    const ids = data?.record_id_list || [];
+    rows.forEach((row, index) => records.push({
+      record_id: ids[index],
+      fields: Object.fromEntries(fields.map((field, fieldIndex) => [field, row[fieldIndex]])),
+    }));
+  }
+  return records;
+}
+
+function createdRecordIds(value) {
+  return value?.data?.record_id_list || value?.record_id_list || [];
+}
+
+function portableField(field) {
+  const allowed = new Set(['text', 'number', 'select', 'datetime', 'attachment', 'checkbox']);
+  if (!allowed.has(field.type)) return null;
+  const result = { type: field.type, name: field.name };
+  if (field.style) result.style = field.style;
+  if (field.type === 'select') {
+    result.multiple = Boolean(field.multiple);
+    if (Array.isArray(field.options)) result.options = field.options.map((option) => ({ name: option.name })).filter((option) => option.name);
+  }
+  return result;
+}
+
+function ensureLinkField(binding, blogger, identity) {
+  const fields = fieldObjects(listFields(binding, identity));
+  const existing = fields.find((field) => field.name === '所属博主');
+  if (existing) {
+    if (existing.type !== 'link' || String(existing.link_table || '') !== blogger.table_id) {
+      throw new Error(`${binding.table_name} 已有“所属博主”字段，但不是指向博主主页的关联字段；为避免改型或覆盖，请先人工处理该字段`);
+    }
+    return false;
+  }
+  createField(binding, identity, { type: 'link', name: '所属博主', link_table: blogger.table_id });
+  return true;
+}
+
+function copyVideoLibrary(source, target, identity) {
+  const sourceFields = fieldObjects(listFields(source, identity));
+  const targetFields = fieldObjects(listFields(target, identity));
+  const targetNames = new Set(targetFields.map((field) => field.name));
+  for (const field of sourceFields) {
+    if (targetNames.has(field.name)) continue;
+    const portable = portableField(field);
+    if (!portable) continue;
+    createField(target, identity, portable);
+    targetNames.add(field.name);
+  }
+  const records = recordRowsFromPages(listRecordDetails(source, identity));
+  if (!records.length) return { records: 0, attachments: 0, skipped_existing: 0 };
+  const targetRecords = recordRowsFromPages(listRecordDetails(target, identity));
+  const linkOf = (record) => valuesAsStrings(record.fields?.['链接']).find((value) => /^https?:\/\//.test(value)) || '';
+  const existingByLink = new Map(targetRecords.map((record) => [linkOf(record), record]).filter(([link]) => link));
+  const attachmentFields = sourceFields.filter((field) => field.type === 'attachment').map((field) => field.name);
+  const writableFields = sourceFields
+    .filter((field) => portableField(field) && field.type !== 'attachment')
+    .map((field) => field.name)
+    .filter((name) => targetNames.has(name));
+  const mapping = records.filter((record) => existingByLink.has(linkOf(record))).map((record) => ({ source: record, target_id: existingByLink.get(linkOf(record)).record_id, target: existingByLink.get(linkOf(record)), created: false }));
+  const missing = records.filter((record) => !existingByLink.has(linkOf(record)));
+  for (let offset = 0; offset < missing.length; offset += 200) {
+    const batch = missing.slice(offset, offset + 200);
+    const result = batchCreate(target, identity, writableFields, batch.map((record) => writableFields.map((field) => record.fields[field] ?? null)));
+    const ids = createdRecordIds(result);
+    batch.forEach((record, index) => mapping.push({ source: record, target_id: ids[index], target: null, created: true }));
+  }
+  let attachmentCount = 0;
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-video-base-migration-'));
+  try {
+    for (const item of mapping) {
+      if (!item.target_id) continue;
+      for (const field of attachmentFields) {
+        const attachments = Array.isArray(item.source.fields[field]) ? item.source.fields[field] : [];
+        const existingNames = new Set((Array.isArray(item.target?.fields?.[field]) ? item.target.fields[field] : []).map((attachment) => attachment?.name).filter(Boolean));
+        for (const attachment of attachments) {
+          if (!attachment?.file_token) continue;
+          if (attachment.name && existingNames.has(attachment.name)) continue;
+          const dir = fs.mkdtempSync(path.join(tempRoot, 'file-'));
+          downloadAttachment(source, identity, item.source.record_id, attachment.file_token, dir);
+          const files = fs.readdirSync(dir).filter((name) => !name.startsWith('.'));
+          if (!files.length) throw new Error(`附件下载完成但未找到本地文件：${attachment.name || attachment.file_token}`);
+          uploadAttachments(target, identity, item.target_id, field, [files[0]], { cwd: dir });
+          attachmentCount += 1;
+        }
+      }
+    }
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+  return { records: missing.length, attachments: attachmentCount, skipped_existing: records.length - missing.length };
+}
+
+function applyMissingSchema(config) {
+  const plans = migrationPlans(config);
   const created = {};
   for (const type of ['image_text', 'video']) {
     const binding = config.feishu[type];
@@ -379,11 +610,53 @@ function applySchemaUpgrade({ config, plans, planId, args, confirmationFlag }) {
     }
     if (plans[type].visible_fields_after.length) setVisibleFields(binding, config.feishu.identity, plans[type].visible_fields_after);
   }
-  const migrated = normalizeConfig({ ...config, schema_version: DATA_SCHEMA_VERSION });
+  return { created, plans };
+}
+
+function applySchemaUpgrade({ config, plans, planId, args, confirmationFlag }) {
+  if (!args[confirmationFlag]) throw new Error('尚未取得用户对表结构升级的明确授权');
+  if (!args['plan-id']) throw new Error('缺少 --plan-id；请先运行 upgrade-check，把升级说明展示给用户并取得授权');
+  if (args['plan-id'] !== planId) throw new Error('升级方案已经变化，原授权失效。请重新运行 upgrade-check 并再次征得用户授权');
+  const report = migrationReportPath(args, 'schema-v2-migration');
+  writeJsonAtomic(report, { generated_at: new Date().toISOString(), phase: 'before', plan_id: planId, current_schema_version: config.schema_version, target_schema_version: DATA_SCHEMA_VERSION, plans });
+  const identity = config.feishu.identity;
+  const workspace = workspacePlan(config);
+  const imageText = { ...config.feishu.image_text };
+  if (workspace.rename_image_table) renameTable(imageText, identity, '图文笔记');
+  imageText.table_name = '图文笔记';
+  let blogger;
+  if (workspace.blogger_table) {
+    blogger = ensureViewId(bindingFromTable(imageText, workspace.blogger_table, workspace.blogger_table.name), identity);
+  } else {
+    blogger = createTable({ baseToken: imageText.base_token, baseUrl: imageText.base_url, baseName: imageText.base_name, name: '博主主页', fields: BLOGGER_FIELD_SCHEMA, identity });
+  }
+  let video;
+  let copied = { records: 0, attachments: 0 };
+  if (workspace.target_video_table) {
+    video = bindingFromTable(imageText, workspace.target_video_table, '视频笔记');
+    video.view_id = config.feishu.video.base_token === imageText.base_token && config.feishu.video.table_id === video.table_id
+      ? config.feishu.video.view_id : video.view_id;
+    video = ensureViewId(video, identity);
+    if (workspace.target_video_table.name !== '视频笔记') renameTable(video, identity, '视频笔记');
+    if (workspace.copy_video_records) copied = copyVideoLibrary(config.feishu.video, video, identity);
+  } else if (config.feishu.video.base_token === imageText.base_token) {
+    video = { ...config.feishu.video, table_name: '视频笔记' };
+    renameTable(video, identity, '视频笔记');
+  } else {
+    video = createTable({ baseToken: imageText.base_token, baseUrl: imageText.base_url, baseName: imageText.base_name, name: '视频笔记', fields: VIDEO_FIELD_SCHEMA, identity });
+    copied = copyVideoLibrary(config.feishu.video, video, identity);
+  }
+  if (!blogger.view_id || !video.view_id) throw new Error('统一工作台的数据表已找到，但缺少 View ID；请检查表权限后重新运行 upgrade-check');
+  const linksCreated = {
+    image_text: ensureLinkField(imageText, blogger, identity),
+    video: ensureLinkField(video, blogger, identity),
+  };
+  const migrated = normalizeConfig({ ...config, schema_version: DATA_SCHEMA_VERSION, initialized: true, feishu: { ...config.feishu, image_text: imageText, video, blogger } });
   writeJsonAtomic(configPath(), migrated);
+  const afterApplied = applyMissingSchema(migrated);
   const after = migrationPlans(migrated);
-  writeJsonAtomic(report, { generated_at: new Date().toISOString(), phase: 'complete', plan_id: planId, previous_schema_version: config.schema_version, schema_version: DATA_SCHEMA_VERSION, created, plans_before: plans, plans_after: after });
-  return { ok: true, action: 'upgrade_applied', plan_id: planId, schema_version: DATA_SCHEMA_VERSION, created, report, next_authorization: '表结构升级已完成。是否需要预览并修复历史图片？历史修复将单独征求授权。' };
+  writeJsonAtomic(report, { generated_at: new Date().toISOString(), phase: 'complete', plan_id: planId, previous_schema_version: config.schema_version, schema_version: DATA_SCHEMA_VERSION, workspace, copied, links_created: linksCreated, created: afterApplied.created, plans_before: plans, plans_after: after });
+  return { ok: true, action: 'upgrade_applied', plan_id: planId, schema_version: DATA_SCHEMA_VERSION, workspace_url: imageText.base_url, tables: { image_text: imageText, video, blogger }, copied, links_created: linksCreated, report, source_video_base_preserved: workspace.preserve_source_video_base, next_authorization: '内容工作台升级已完成。原视频库仍保留为备份；如需删除旧库或修复历史图片，必须再次单独征求授权。' };
 }
 
 async function upgradeApply(args) {

@@ -61,10 +61,10 @@ export function inspectLarkAuth(found, identity = 'bot') {
   }
 }
 
-export function runLark(args, { allowFailure = false } = {}) {
+export function runLark(args, { allowFailure = false, cwd } = {}) {
   const found = discoverLark();
   if (!found) throw new Error('未找到飞书 CLI；请安装 Node.js 后运行 npx -y @larksuite/cli auth login');
-  const result = run(found.command, [...found.prefix, ...args]);
+  const result = run(found.command, [...found.prefix, ...args], cwd ? { cwd } : {});
   if (result.status !== 0 && !allowFailure) throw new Error((result.stderr || result.stdout || `飞书 CLI 退出码 ${result.status}`).trim());
   return { ...result, json: result.status === 0 ? parseJsonOutput(result.stdout) : null };
 }
@@ -99,6 +99,41 @@ export function createBase({ name, fields, identity = 'bot', timezone = 'Asia/Sh
     table_id: String(tableId),
     view_id: String(viewId),
     permission_grant: data?.permission_grant || result.json.permission_grant || null,
+  };
+}
+
+export function listTables(baseToken, identity) {
+  return runLark(['base', '+table-list', '--as', identity, '--base-token', baseToken, '--format', 'json']).json;
+}
+
+export function renameTable(binding, identity, name) {
+  return runLark(['base', '+table-update', '--as', identity, '--base-token', binding.base_token, '--table-id', binding.table_id, '--name', name, '--format', 'json']).json;
+}
+
+export function listViews(binding, identity) {
+  return runLark(['base', '+view-list', '--as', identity, '--base-token', binding.base_token, '--table-id', binding.table_id, '--format', 'json']).json;
+}
+
+export function createTable({ baseToken, baseUrl = '', baseName = '', name, fields, identity }) {
+  const result = runLark(['base', '+table-create', '--as', identity, '--base-token', baseToken, '--name', name, '--fields', JSON.stringify(fields), '--format', 'json']);
+  const ids = collectByKey(result.json, ['table_id', 'default_view_id', 'view_id']);
+  const data = result.json?.data || result.json;
+  const tableId = data?.table?.id || data?.id || ids.table_id;
+  if (!tableId) throw new Error(`创建数据表成功但无法识别 Table ID：${JSON.stringify(result.json)}`);
+  let viewId = data?.table?.views?.[0]?.id || data?.views?.[0]?.id || ids.default_view_id || ids.view_id;
+  if (!viewId) {
+    const views = listViews({ base_token: baseToken, table_id: String(tableId) }, identity);
+    const viewData = views?.data || views;
+    viewId = viewData?.views?.[0]?.id || viewData?.items?.[0]?.id || collectByKey(views, ['view_id']).view_id;
+  }
+  if (!viewId) throw new Error('无法识别新建数据表的 View ID');
+  return {
+    base_name: baseName,
+    base_token: String(baseToken),
+    base_url: baseUrl || `https://my.feishu.cn/base/${baseToken}`,
+    table_name: name,
+    table_id: String(tableId),
+    view_id: String(viewId),
   };
 }
 
@@ -149,12 +184,16 @@ export function updateRecord(binding, identity, recordId, fields) {
   return runLark(['base', '+record-upsert', '--as', identity, '--base-token', binding.base_token, '--table-id', binding.table_id, '--record-id', recordId, '--json', JSON.stringify(fields), '--format', 'json']).json;
 }
 
-export function uploadAttachments(binding, identity, recordId, field, files) {
+export function uploadAttachments(binding, identity, recordId, field, files, { cwd } = {}) {
   if (!files.length) return null;
   const args = ['base', '+record-upload-attachment', '--as', identity, '--base-token', binding.base_token, '--table-id', binding.table_id, '--record-id', recordId, '--field-id', field];
   for (const file of files) args.push('--file', file);
   args.push('--format', 'json');
-  return runLark(args).json;
+  return runLark(args, { cwd }).json;
+}
+
+export function downloadAttachment(binding, identity, recordId, fileToken, outputDir) {
+  return runLark(['base', '+record-download-attachment', '--as', identity, '--base-token', binding.base_token, '--table-id', binding.table_id, '--record-id', recordId, '--file-token', fileToken, '--output', '.', '--format', 'json'], { cwd: outputDir }).json;
 }
 
 export function batchCreate(binding, identity, fields, rows) {
