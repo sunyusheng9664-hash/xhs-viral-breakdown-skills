@@ -91,9 +91,10 @@ test('配置校验拒绝缺少绑定标识', () => {
   assert.ok(errors.some((error) => error.includes('base_token')));
 });
 
-test('配置兼容 Schema v1 并保留 Schema v2', () => {
+test('配置兼容 Schema v1、v2 并保留 Schema v3', () => {
   assert.equal(normalizeConfig({ schema_version: 1 }).schema_version, 1);
   assert.equal(normalizeConfig({ schema_version: 2 }).schema_version, 2);
+  assert.equal(normalizeConfig({ schema_version: 3 }).schema_version, 3);
 });
 
 test('Schema v2 迁移只新增缺失字段并保留自定义视图字段', () => {
@@ -224,20 +225,22 @@ test('无旧配置时识别为首次安装且不访问飞书', () => {
   assert.equal(output.next_action, 'configure');
 });
 
-test('更新先说明和授权，方案变化或未授权时不能迁移', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-schema-v2-'));
+test('更新先说明授权并把双库升级为统一工作台', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-schema-v3-'));
   const bin = path.join(dir, 'bin');
   const configHome = path.join(dir, 'config');
   const reports = path.join(dir, 'reports');
   const log = path.join(dir, 'lark.log');
   fs.mkdirSync(bin, { recursive: true });
-  writeJsonAtomic(path.join(configHome, 'config.json'), normalizeConfig({ schema_version: 1, initialized: true, feishu: { identity: 'bot', image_text: { base_token: 'image', table_id: 'table-image', view_id: 'view-image' }, video: { base_token: 'video', table_id: 'table-video', view_id: 'view-video' } } }));
+  writeJsonAtomic(path.join(configHome, 'config.json'), normalizeConfig({ schema_version: 1, initialized: true, feishu: { identity: 'bot', image_text: { base_token: 'base', table_id: 'table-image', table_name: '内容拆解库', view_id: 'view-image' }, video: { base_token: 'base', table_id: 'table-video', table_name: '内容拆解库', view_id: 'view-video' } } }));
   const fake = path.join(bin, 'lark-cli');
   fs.writeFileSync(fake, `#!/bin/sh
 echo "$*" >> "$LARK_TEST_LOG"
 if [ "$1" = "--version" ]; then echo "1.0.0"; exit 0; fi
 case " $* " in
   *" auth status "*) echo '{"identities":{"bot":{"status":"ready","available":true,"verified":true}}}' ;;
+  *" +table-list "*) echo '{"data":{"tables":[{"id":"table-image","name":"内容拆解库"},{"id":"table-video","name":"内容拆解库"},{"id":"table-blogger","name":"博主主页"}]}}' ;;
+  *" +view-list "*) echo '{"data":{"views":[{"id":"view-blogger","name":"Grid View"}]}}' ;;
   *" +field-list "*) echo '{"data":{"items":[{"id":"fld-title","name":"标题","type":"text"},{"id":"fld-custom","name":"自定义标签","type":"text"}]}}' ;;
   *" +view-get-visible-fields "*) echo '{"data":{"visible_fields":["标题","封面","图片","自定义标签"]}}' ;;
   *) echo '{"ok":true}' ;;
@@ -250,9 +253,10 @@ esac
   assert.equal(check.status, 0, check.stderr || check.stdout);
   const preview = JSON.parse(check.stdout);
   assert.equal(preview.mode, 'upgrade');
-  assert.equal(preview.authorization.scope, 'schema_only');
-  assert.deepEqual(preview.authorization.excludes, ['历史图片修复']);
-  assert.match(preview.customer_message, /是否授权我升级现有多维表格结构/);
+  assert.equal(preview.authorization.scope, 'workspace_consolidation');
+  assert.ok(preview.authorization.excludes.includes('删除原视频库'));
+  assert.match(preview.customer_message, /小红书内容工作台/);
+  assert.match(preview.customer_message, /是否授权我按以上方案合并现有多维表格/);
   assert.doesNotMatch(fs.readFileSync(log, 'utf8'), /\+field-create/);
   const blocked = spawnSync(process.execPath, [cli, 'upgrade-apply', '--plan-id', preview.plan_id, '--output-dir', reports], { encoding: 'utf8', env });
   assert.equal(blocked.status, 1, blocked.stderr || blocked.stdout);
@@ -261,18 +265,41 @@ esac
   assert.match(`${stale.stdout}${stale.stderr}`, /原授权失效/);
   const migrated = spawnSync(process.execPath, [cli, 'upgrade-apply', '--plan-id', preview.plan_id, '--confirm-upgrade', '--output-dir', reports], { encoding: 'utf8', env });
   assert.equal(migrated.status, 0, migrated.stderr || migrated.stdout);
-  assert.equal(JSON.parse(migrated.stdout).schema_version, 2);
+  assert.equal(JSON.parse(migrated.stdout).schema_version, 3);
   assert.match(JSON.parse(migrated.stdout).next_authorization, /单独征求授权/);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(configHome, 'config.json'), 'utf8')).schema_version, 2);
+  const saved = JSON.parse(fs.readFileSync(path.join(configHome, 'config.json'), 'utf8'));
+  assert.equal(saved.schema_version, 3);
+  assert.equal(saved.feishu.video.base_token, saved.feishu.image_text.base_token);
+  assert.equal(saved.feishu.blogger.table_id, 'table-blogger');
   assert.match(fs.readFileSync(log, 'utf8'), /\+field-create/);
   assert.match(fs.readFileSync(log, 'utf8'), /\+view-set-visible-fields/);
+});
+
+test('飞书用户身份未授权时先返回最小权限引导，不读取表结构', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-auth-guide-'));
+  const bin = path.join(dir, 'bin');
+  const configHome = path.join(dir, 'config');
+  const log = path.join(dir, 'lark.log');
+  fs.mkdirSync(bin, { recursive: true });
+  writeJsonAtomic(path.join(configHome, 'config.json'), normalizeConfig({ schema_version: 2, initialized: true, feishu: { identity: 'user', image_text: { base_token: 'image', table_id: 'table-image', view_id: 'view-image' }, video: { base_token: 'video', table_id: 'table-video', view_id: 'view-video' } } }));
+  const fake = path.join(bin, 'lark-cli');
+  fs.writeFileSync(fake, `#!/bin/sh\necho "$*" >> "$LARK_TEST_LOG"\nif [ "$1" = "--version" ]; then echo "1.0.0"; exit 0; fi\necho '{"identities":{"user":{"status":"missing","available":false,"verified":false}}}'\n`);
+  fs.chmodSync(fake, 0o755);
+  const cli = fileURLToPath(new URL('../skills/xhs-viral-breakdown-to-bitable/scripts/xhs-breakdown.mjs', import.meta.url));
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, XHS_VIRAL_CONFIG_HOME: configHome, LARK_TEST_LOG: log };
+  const check = spawnSync(process.execPath, [cli, 'upgrade-check'], { encoding: 'utf8', env });
+  assert.equal(check.status, 0, check.stderr || check.stdout);
+  const output = JSON.parse(check.stdout);
+  assert.equal(output.mode, 'authorization_required');
+  assert.equal(output.authorization.command, 'lark-cli auth login --domain base --no-wait --json');
+  assert.doesNotMatch(fs.readFileSync(log, 'utf8'), /\+table-list|\+field-list/);
 });
 
 test('飞书命令失败时仍保留 Excel 备份', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-write-failure-'));
   const configHome = path.join(dir, 'config');
   fs.mkdirSync(configHome, { recursive: true });
-  writeJsonAtomic(path.join(configHome, 'config.json'), normalizeConfig({ schema_version: 2, initialized: true, feishu: { identity: 'bot', image_text: { base_token: 'base', table_id: 'table', view_id: 'view' }, video: { base_token: 'base2', table_id: 'table2', view_id: 'view2' } } }));
+  writeJsonAtomic(path.join(configHome, 'config.json'), normalizeConfig({ schema_version: 3, initialized: true, feishu: { identity: 'bot', image_text: { base_token: 'base', table_id: 'table', view_id: 'view' }, video: { base_token: 'base', table_id: 'table2', view_id: 'view2' }, blogger: { base_token: 'base', table_id: 'table3', view_id: 'view3' } } }));
   const input = path.join(dir, 'analyzed.json');
   fs.writeFileSync(input, JSON.stringify({ items: [{ status: 'success', type: 'image_text', original_url: 'https://xhslink.com/a', final_url: 'https://www.xiaohongshu.com/explore/n1', note_id: 'n1', data: { title: '标题', topics: [], image_urls: [], metrics: {} }, analysis: { body_summary: '摘要', cover_analysis: '未检查封面', interaction_drivers: '收藏', viral_reasons: '结构', reusable_tactics: '模板' } }] }));
   const cli = fileURLToPath(new URL('../skills/xhs-viral-breakdown-to-bitable/scripts/xhs-breakdown.mjs', import.meta.url));

@@ -1,4 +1,4 @@
-export const DATA_SCHEMA_VERSION = 2;
+export const DATA_SCHEMA_VERSION = 3;
 
 export const ARCHIVE_STATUS_OPTIONS = [
   '成功', '部分成功', '待处理', '源笔记不可访问', '短链失效',

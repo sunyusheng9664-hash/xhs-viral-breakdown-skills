@@ -21,10 +21,10 @@ node "<skill-dir>/scripts/xhs-breakdown.mjs" configure --migrate
 node "<skill-dir>/scripts/xhs-breakdown.mjs" configure --bind <绑定文件.json>
 ```
 
-需要创建新库时，必须先询问：
+需要创建新工作台时，必须先询问：
 
 ```text
-我需要创建两个长期使用的飞书多维表格：小红书视频爆款拆解库和小红书图文爆款拆解库。之后会分别追加内容。是否现在创建？
+我需要创建一个长期使用的“小红书内容资产库”，里面包含图文笔记、视频笔记和博主主页三张数据表。之后所有内容都在同一个工作台中追加，便于关联博主和制作看板。是否现在创建？
 ```
 
 用户明确同意后运行：
@@ -47,18 +47,26 @@ node "<skill-dir>/scripts/xhs-breakdown.mjs" configure --create-test --confirm-c
   "feishu": {
     "identity": "bot",
     "video": {
-      "base_name": "小红书视频爆款拆解库",
+      "base_name": "小红书内容资产库",
       "base_token": "",
       "base_url": "",
-      "table_name": "内容拆解库",
+      "table_name": "视频笔记",
       "table_id": "",
       "view_id": ""
     },
     "image_text": {
-      "base_name": "小红书图文爆款拆解库",
+      "base_name": "小红书内容资产库",
       "base_token": "",
       "base_url": "",
-      "table_name": "内容拆解库",
+      "table_name": "图文笔记",
+      "table_id": "",
+      "view_id": ""
+    },
+    "blogger": {
+      "base_name": "小红书内容资产库",
+      "base_token": "",
+      "base_url": "",
+      "table_name": "博主主页",
       "table_id": "",
       "view_id": ""
     }
@@ -76,13 +84,13 @@ node "<skill-dir>/scripts/xhs-breakdown.mjs" configure --create-test --confirm-c
 node "<skill-dir>/scripts/xhs-breakdown.mjs" upgrade-check --output-dir <报告目录>
 ```
 
-返回 `install` 时继续首次配置；返回 `ready` 时直接使用；返回 `upgrade` 时，必须把 `customer_message` 原样展示给用户并停止。用户明确同意本次方案后，使用同一次检查返回的 `plan_id` 运行：
+返回 `install` 时继续首次配置；返回 `authorization_required` 时先完成最小飞书授权并重新检查；返回 `ready` 时直接使用；返回 `upgrade` 时，必须把 `customer_message` 原样展示给用户并停止。用户明确同意本次方案后，使用同一次检查返回的 `plan_id` 运行：
 
 ```text
 node "<skill-dir>/scripts/xhs-breakdown.mjs" upgrade-apply --plan-id <plan_id> --confirm-upgrade --output-dir <报告目录>
 ```
 
-命令会保存升级前后的字段和视图报告。它只新增缺失字段、保留旧字段和自定义字段。若方案发生变化，旧 `plan_id` 会失效，必须重新说明并授权。`schema-plan` 和 `schema-migrate` 仅保留为兼容入口，同样要求匹配的 `plan_id` 和明确确认。
+命令会保存升级前后的工作台、字段、视图、记录和附件迁移报告。原视频库保留为备份；若方案发生变化，旧 `plan_id` 会失效，必须重新说明并授权。`schema-plan` 和 `schema-migrate` 仅保留为兼容入口，同样要求匹配的 `plan_id` 和明确确认。
 
 ## 修复历史图片
 

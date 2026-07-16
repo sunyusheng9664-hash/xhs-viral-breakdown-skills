@@ -62,8 +62,10 @@ export function normalizeConfig(input = {}) {
     table_id: source.image_text_table_id,
     view_id: source.image_text_view_id,
   } : (source.image_text || input.image_text || {});
+  const blogger = source.blogger || input.blogger || {};
+  const requestedVersion = Number(input.schema_version);
   return {
-    schema_version: Number(input.schema_version) === 2 ? 2 : 1,
+    schema_version: [1, 2, 3].includes(requestedVersion) ? requestedVersion : 1,
     initialized: Boolean(input.initialized || (video.base_token && imageText.base_token)),
     created_at: input.created_at || new Date().toISOString(),
     timezone: input.timezone || 'Asia/Shanghai',
@@ -71,13 +73,14 @@ export function normalizeConfig(input = {}) {
       identity: source.identity === 'user' ? 'user' : 'bot',
       video: normalizeBinding(video, '小红书视频爆款拆解库'),
       image_text: normalizeBinding(imageText, '小红书图文爆款拆解库'),
+      blogger: normalizeBinding(blogger, '博主主页'),
     },
   };
 }
 
 export function validateConfig(config, { requireBindings = true } = {}) {
   const errors = [];
-  if (!config || ![1, 2].includes(config.schema_version)) errors.push('schema_version 必须为 1 或 2');
+  if (!config || ![1, 2, 3].includes(config.schema_version)) errors.push('schema_version 必须为 1、2 或 3');
   for (const type of ['video', 'image_text']) {
     const binding = config?.feishu?.[type];
     if (!binding) {
@@ -88,6 +91,12 @@ export function validateConfig(config, { requireBindings = true } = {}) {
       for (const key of ['base_token', 'table_id', 'view_id']) {
         if (!binding[key]) errors.push(`缺少 feishu.${type}.${key}`);
       }
+    }
+  }
+  if (requireBindings && config?.schema_version === 3) {
+    const binding = config?.feishu?.blogger;
+    for (const key of ['base_token', 'table_id', 'view_id']) {
+      if (!binding?.[key]) errors.push(`缺少 feishu.blogger.${key}`);
     }
   }
   return errors;

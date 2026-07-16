@@ -1,8 +1,8 @@
 # 小红书爆款拆解与飞书归档 Skill
 
-把用户主动提供的公开小红书图文或视频链接转换成结构化内容资产，生成 Excel 备份，并分别写入长期使用的飞书多维表格。
+把用户主动提供的公开小红书图文或视频链接转换成结构化内容资产，生成 Excel 备份，并写入包含图文笔记、视频笔记和博主主页的统一飞书内容工作台。
 
-当前版本：v1.2.1。更新旧版 Skill 时会先说明改了什么、原表要怎样调整和准备如何执行，取得用户授权后才修改表结构；首次安装不显示升级提示。详见 [RELEASE_NOTES_v1.2.1.md](RELEASE_NOTES_v1.2.1.md)。
+当前版本：v1.3.0。旧用户更新后，Skill 会先检查飞书权限，再说明双库合并方案、体验提升、权限范围和安全边界；取得一次性授权后才迁移。详见 [RELEASE_NOTES_v1.3.0.md](RELEASE_NOTES_v1.3.0.md)。
 
 本仓库现在包含两个对外交付版本：
 
@@ -56,7 +56,7 @@ TRAE 安装包已经生成，但客户端导入方式和端到端运行尚待实
 
 在“技能 → 添加技能 → 上传技能”中导入 `xhs-viral-breakdown-to-bitable-workbuddy.zip`。首轮只承诺桌面端；网页端和移动端未完成端到端验证。
 
-## 首次授权
+## 首次授权与旧用户升级
 
 先检查环境：
 
@@ -66,7 +66,7 @@ node "/完整路径/xhs-viral-breakdown-to-bitable/scripts/xhs-breakdown.mjs" do
 
 首次运行时如果只因 Skill 配置尚不存在而返回失败，继续完成下方初始化，之后重新运行 `doctor`。其他失败项应先修复。
 
-首次使用飞书 CLI 需要先初始化应用配置：
+首次使用飞书 CLI 需要先初始化应用配置。旧用户更新后也会先检查当前身份是否具备 Base 读写及附件权限：
 
 ```text
 lark-cli config init --new
@@ -109,6 +109,8 @@ node "/完整路径/xhs-viral-breakdown-to-bitable/scripts/xhs-breakdown.mjs" co
 - 页面不再公开：记录失败阶段和原因，不编造内容。
 - 图片归档：图片先下载为本地临时文件，再上传到飞书附件字段，不把临时 CDN 链接当作长期存储。
 - 已有表升级：先运行 `upgrade-check` 并向用户展示返回的说明；用户明确同意后，按返回的 `plan_id` 运行 `upgrade-apply --confirm-upgrade`。
+- 旧版双库：升级后统一到原图文库所在 Base，原视频库保留为备份。
+- 授权不足：`upgrade-check` 返回 `authorization_required`；user 身份发起 Base 最小授权，bot 身份引导开发者后台补权限。
 - 历史图片：先运行 `repair-images --dry-run`；确认后再运行 `repair-images --confirm-repair`。
 
 ## 回滚
@@ -116,6 +118,7 @@ node "/完整路径/xhs-viral-breakdown-to-bitable/scripts/xhs-breakdown.mjs" co
 - 升级前完整基线：Git 标签 `pre-v1.2.0-20260714`
 - v1.2.1 升级前基线：Git 标签 `pre-v1.2.1-20260714`（指向 v1.2.0）
 - 本次发布版本：Git 标签 `v1.2.1`
+- v1.3.0 尚未创建 Git 标签；发布前应先完成真实旧用户迁移验收，再建立标签。
 - 回滚只切换代码版本，不会自动删除飞书中已新增的字段或附件；这些新增内容与旧版兼容，可保留。
 
 Windows、TRAE、WorkBuddy 只有在实际端到端验收后才应在销售页面标记为“已验证”。
