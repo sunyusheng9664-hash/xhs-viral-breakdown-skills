@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { configPath, legacyConfigPath, loadConfig, normalizeConfig, validateConfig, writeJsonAtomic } from '../skills/xhs-viral-breakdown-to-bitable/scripts/lib/config.mjs';
 import { selectPending } from '../skills/xhs-viral-breakdown-to-bitable/scripts/lib/dedupe.mjs';
-import { extractInitialStateText, extractUrls, fetchPage, findNoteObject, findSubtitleUrl, normalizeNote, parseCount, parseInitialState, parseMediaV2, srtToTranscript } from '../skills/xhs-viral-breakdown-to-bitable/scripts/lib/xhs.mjs';
+import { canonicalProfileUrl, extractInitialStateText, extractOne, extractUrls, fetchPage, findNoteObject, findSubtitleUrl, normalizeBloggerProfile, normalizeNote, parseCount, parseInitialState, parseMediaV2, profileIdFromUrl, srtToTranscript } from '../skills/xhs-viral-breakdown-to-bitable/scripts/lib/xhs.mjs';
 import { parseJsonOutput, valuesAsStrings } from '../skills/xhs-viral-breakdown-to-bitable/scripts/lib/lark.mjs';
 import { buildMigrationPlan, classifyRepairFailure, recordObjects } from '../skills/xhs-viral-breakdown-to-bitable/scripts/lib/migration.mjs';
 import { downloadFreshMedia } from '../skills/xhs-viral-breakdown-to-bitable/scripts/lib/media.mjs';
@@ -33,6 +33,7 @@ test('递归定位笔记对象而不依赖固定路径', () => {
 
 test('数字单位、mediaV2 二次解析和 SRT 文本归并', () => {
   assert.equal(parseCount('1.2万'), 12000);
+  assert.equal(parseCount('1千+'), 1000);
   assert.equal(parseCount('3K'), 3000);
   assert.deepEqual(parseMediaV2(JSON.stringify(JSON.stringify({ video: { duration: 12 } }))), { video: { duration: 12 } });
   assert.equal(srtToTranscript('1\n00:00:00,000 --> 00:00:01,000\n你好\n\n2\n00:00:01,000 --> 00:00:02,000\n世界'), '你好\n世界');
@@ -44,12 +45,47 @@ test('字幕优先选择 source 中文而不是通用 subtitles 对象的首项'
 });
 
 test('规范化图文和视频并保持数字类型', () => {
-  const image = normalizeNote({ noteId: 'i1', title: '图文', imageList: [{ urlDefault: 'https://img/1' }, { url: 'https://img/2' }], interactInfo: { likedCount: '10', collectedCount: 2 } }, { originalUrl: 'https://xhslink.com/i', finalUrl: 'https://www.xiaohongshu.com/explore/i1', noteId: 'i1' });
+  const image = normalizeNote({ noteId: 'i1', title: '图文', user: { userId: 'u1', nickname: '作者' }, imageList: [{ urlDefault: 'https://img/1' }, { url: 'https://img/2' }], interactInfo: { likedCount: '10', collectedCount: 2 } }, { originalUrl: 'https://xhslink.com/i', finalUrl: 'https://www.xiaohongshu.com/explore/i1', noteId: 'i1' });
   assert.equal(image.type, 'image_text');
   assert.equal(image.data.metrics.liked, 10);
+  assert.equal(image.data.author_id, 'u1');
   const video = normalizeNote({ noteId: 'v1', title: '视频', video: {}, mediaV2: JSON.stringify({ video: { duration: 12000 } }) }, { originalUrl: 'https://xhslink.com/v', finalUrl: 'https://www.xiaohongshu.com/explore/v1', noteId: 'v1' });
   assert.equal(video.type, 'video');
   assert.equal(video.data.duration_seconds, 12);
+});
+
+test('识别并规范化博主主页而不是误判为图文', async () => {
+  const finalUrl = 'https://www.xiaohongshu.com/user/profile/u123?xsec_token=token';
+  const state = {
+    user: {
+      userPageData: {
+        basicInfo: { nickname: '测试博主', redId: 'red123', desc: '公开简介', imageb: 'https://img/avatar.webp' },
+        interactions: [
+          { type: 'fans', count: '1.2万' },
+          { type: 'follows', count: '10+' },
+          { type: 'interaction', count: '3万+' },
+        ],
+      },
+      notes: [[
+        { noteCard: { noteId: 'n1', displayTitle: '较高点赞', user: { userId: 'u123' }, interactInfo: { likedCount: '99' }, cover: { url: 'https://img/1.webp' } } },
+        { noteCard: { noteId: 'n2', displayTitle: '普通笔记', user: { userId: 'u123' }, interactInfo: { likedCount: '8' } } },
+      ]],
+    },
+  };
+  const normalized = normalizeBloggerProfile(state, { originalUrl: 'https://xhslink.com/m/profile', finalUrl });
+  assert.equal(profileIdFromUrl(finalUrl), 'u123');
+  assert.equal(canonicalProfileUrl(finalUrl), 'https://www.xiaohongshu.com/user/profile/u123');
+  assert.equal(normalized.type, 'blogger_profile');
+  assert.equal(normalized.data.follower_count, 12000);
+  assert.equal(normalized.data.total_likes_collects, 30000);
+  assert.equal(normalized.data.top_visible_notes[0].note_id, 'n1');
+
+  const html = `<script>window.__INITIAL_STATE__=${JSON.stringify(state)}</script>`;
+  const fakeFetch = async () => ({ ok: true, status: 200, url: finalUrl, text: async () => html });
+  const extracted = await extractOne('https://xhslink.com/m/profile', fakeFetch);
+  assert.equal(extracted.type, 'blogger_profile');
+  assert.equal(extracted.profile_id, 'u123');
+  assert.equal(extracted.note_id, '');
 });
 
 test('桌面请求失败后使用移动端 UA 回退', async () => {
@@ -142,6 +178,13 @@ test('图片下载只使用本次从原笔记提取的地址并保持顺序命�
   assert.equal(result.errors.length, 0);
 });
 
+test('博主头像下载使用独立附件命名', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-avatar-'));
+  const fakeFetch = async () => ({ ok: true, status: 200, headers: { get: () => 'image/webp' }, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer });
+  const result = await downloadFreshMedia({ type: 'blogger_profile', final_url: 'https://www.xiaohongshu.com/user/profile/u1', data: { avatar_url: 'https://img/avatar' } }, dir, fakeFetch);
+  assert.equal(path.basename(result.files[0]), '01_头像.webp');
+});
+
 test('飞书 CLI JSON 可从附带日志的输出解析', () => {
   assert.deepEqual(parseJsonOutput('log line\n{"ok":true}\n'), { ok: true });
 });
@@ -183,6 +226,63 @@ test('archive 无写入模式先产生 Excel 备份', () => {
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const output = JSON.parse(result.stdout);
   assert.equal(fs.existsSync(output.backup), true);
+});
+
+test('archive 无写入模式包含博主主页工作表', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-blogger-archive-'));
+  const input = path.join(dir, 'analyzed.json');
+  fs.writeFileSync(input, JSON.stringify({ items: [{
+    status: 'success', type: 'blogger_profile', original_url: 'https://xhslink.com/m/u1', final_url: 'https://www.xiaohongshu.com/user/profile/u1', profile_id: 'u1', note_id: '',
+    data: { user_id: 'u1', canonical_profile_url: 'https://www.xiaohongshu.com/user/profile/u1', nickname: '博主', red_id: 'red1', description: '简介', follower_count: 100, total_likes_collects: 200, visible_note_count: 1, top_visible_notes: [{ title: '样本', liked_count: 9 }] },
+    analysis: { avatar_style: '真人头像', content_positioning: '健身分享', persona_tags: ['学生'], audience_profile: '健身新人', value_proposition: '训练经验', differentiation: '科研视角', data_limitations: '未登录首屏样本', collection_status: '部分字段缺失' },
+  }] }));
+  const cli = fileURLToPath(new URL('../skills/xhs-viral-breakdown-to-bitable/scripts/xhs-breakdown.mjs', import.meta.url));
+  const result = spawnSync(process.execPath, [cli, 'archive', '--input', input, '--output-dir', dir, '--no-write'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const output = JSON.parse(result.stdout);
+  assert.equal(fs.existsSync(output.backup), true);
+  const strings = spawnSync('unzip', ['-p', output.backup, 'xl/workbook.xml'], { encoding: 'utf8' }).stdout;
+  assert.match(strings, /博主主页/);
+});
+
+test('混合归档按 author_id 把已有笔记关联到博主记录', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-blogger-link-'));
+  const bin = path.join(dir, 'bin');
+  const configHome = path.join(dir, 'config');
+  const log = path.join(dir, 'lark.log');
+  fs.mkdirSync(bin, { recursive: true });
+  writeJsonAtomic(path.join(configHome, 'config.json'), normalizeConfig({ schema_version: 3, initialized: true, feishu: {
+    identity: 'bot',
+    image_text: { base_token: 'base', table_id: 'table1', view_id: 'view1', base_url: 'https://base/workspace' },
+    video: { base_token: 'base', table_id: 'table2', view_id: 'view2', base_url: 'https://base/workspace' },
+    blogger: { base_token: 'base', table_id: 'table3', view_id: 'view3', base_url: 'https://base/workspace' },
+  } }));
+  const fake = path.join(bin, 'lark-cli');
+  fs.writeFileSync(fake, `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "1.0.0"; exit 0; fi
+echo "$*" >> "$LARK_TEST_LOG"
+case " $* " in
+  *" +record-list "*" --table-id table3 "*) echo '{"data":{"data":[{"record_id":"recB","fields":{"主页链接":"https://www.xiaohongshu.com/user/profile/u1","小红书号":"red1"}}],"has_more":false}}' ;;
+  *" +record-list "*" --table-id table1 "*) echo '{"data":{"data":[{"record_id":"recN","fields":{"链接":"https://xhslink.com/n1","笔记ID":"n1"}}],"has_more":false}}' ;;
+  *" +record-list "*) echo '{"data":{"data":[],"has_more":false}}' ;;
+  *) echo '{"ok":true}' ;;
+esac
+`);
+  fs.chmodSync(fake, 0o755);
+  const input = path.join(dir, 'analyzed.json');
+  fs.writeFileSync(input, JSON.stringify({ items: [
+    { status: 'success', type: 'blogger_profile', original_url: 'https://xhslink.com/m/u1', final_url: 'https://www.xiaohongshu.com/user/profile/u1', profile_id: 'u1', note_id: '', data: { user_id: 'u1', canonical_profile_url: 'https://www.xiaohongshu.com/user/profile/u1', nickname: '博主', red_id: 'red1', description: '简介', avatar_url: '' }, analysis: { avatar_style: '文字头像', content_positioning: '效率', persona_tags: ['职场人'], audience_profile: '新人', value_proposition: '方法', differentiation: '案例', data_limitations: '公开首屏', collection_status: '部分字段缺失' } },
+    { status: 'success', type: 'image_text', original_url: 'https://xhslink.com/n1', final_url: 'https://www.xiaohongshu.com/explore/n1', note_id: 'n1', data: { title: '图文', author_id: 'u1', topics: [], image_urls: [], metrics: {} }, analysis: { body_summary: '摘要', cover_analysis: '未检查', interaction_drivers: '实用', viral_reasons: '结构', reusable_tactics: '模板' } },
+  ] }));
+  const cli = fileURLToPath(new URL('../skills/xhs-viral-breakdown-to-bitable/scripts/xhs-breakdown.mjs', import.meta.url));
+  const result = spawnSync(process.execPath, [cli, 'archive', '--input', input, '--output-dir', dir], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, XHS_VIRAL_CONFIG_HOME: configHome, LARK_TEST_LOG: log } });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.linked_to_blogger, 1);
+  assert.equal(output.unlinked_notes.length, 0);
+  const calls = fs.readFileSync(log, 'utf8');
+  assert.match(calls, /所属博主/);
+  assert.match(calls, /recB/);
 });
 
 test('doctor 校验配置和所选飞书身份并可从任意目录运行', () => {

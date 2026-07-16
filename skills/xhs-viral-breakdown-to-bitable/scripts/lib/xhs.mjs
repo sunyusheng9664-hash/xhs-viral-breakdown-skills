@@ -82,7 +82,7 @@ export function findNoteObject(state, noteId = '') {
 export function parseCount(value) {
   if (value === null || value === undefined || value === '') return null;
   if (Number.isFinite(value)) return Math.trunc(value);
-  const text = String(value).replace(/,/g, '').trim();
+  const text = String(value).replace(/,/g, '').trim().replace(/\+$/, '');
   const match = text.match(/^([0-9]+(?:\.[0-9]+)?)\s*([万千kKmM]?)$/);
   if (!match) return null;
   const multiplier = { '': 1, 千: 1000, k: 1000, K: 1000, 万: 10000, m: 1000000, M: 1000000 }[match[2]];
@@ -170,6 +170,89 @@ export function noteIdFromUrl(url) {
   return match?.[1] || '';
 }
 
+export function profileIdFromUrl(url) {
+  const match = String(url).match(/\/user\/profile\/([a-zA-Z0-9]+)/);
+  return match?.[1] || '';
+}
+
+export function canonicalProfileUrl(url) {
+  const profileId = profileIdFromUrl(url);
+  return profileId ? `https://www.xiaohongshu.com/user/profile/${profileId}` : String(url || '');
+}
+
+function interactionCount(interactions, type) {
+  const item = Array.isArray(interactions) ? interactions.find((entry) => entry?.type === type) : null;
+  return parseCount(first(item?.count, item?.i18nCount));
+}
+
+function visibleProfileNotes(state, profileId) {
+  const results = [];
+  const seen = new Set();
+  walk(state?.user?.notes || [], (value) => {
+    const card = value?.noteCard || value?.note_card;
+    if (!card || typeof card !== 'object') return;
+    const noteId = idOf(card);
+    const authorId = String(first(card.user?.userId, card.user?.user_id) || '');
+    const sampleKey = noteId || `${first(card.displayTitle, card.title) || ''}:${first(card.interactInfo?.likedCount, card.interact_info?.liked_count) || ''}`;
+    if (!sampleKey || seen.has(sampleKey) || (profileId && authorId && authorId !== profileId)) return;
+    seen.add(sampleKey);
+    const imageList = first(card.cover, card.imageList, card.image_list);
+    const type = card.video || /video/i.test(String(first(card.type, card.noteType, card.note_type) || '')) ? 'video' : 'image_text';
+    results.push({
+      note_id: noteId,
+      title: first(card.displayTitle, card.title) || '',
+      type,
+      liked_count: parseCount(first(card.interactInfo?.likedCount, card.interact_info?.liked_count)),
+      cover_url: firstUrl(imageList),
+      author_id: authorId,
+    });
+  });
+  return results;
+}
+
+export function findUserPageData(state) {
+  const direct = state?.user?.userPageData || state?.user?.user_page_data;
+  if (direct?.basicInfo || direct?.basic_info) return direct;
+  let best = null;
+  walk(state, (value) => {
+    const basic = value?.basicInfo || value?.basic_info;
+    if (!best && basic && (basic.nickname || basic.redId || basic.red_id) && Array.isArray(value.interactions)) best = value;
+  });
+  if (!best) throw new Error('初始状态中未找到博主主页对象');
+  return best;
+}
+
+export function normalizeBloggerProfile(state, { originalUrl, finalUrl }) {
+  const profileId = profileIdFromUrl(finalUrl);
+  const page = findUserPageData(state);
+  const basic = first(page.basicInfo, page.basic_info) || {};
+  const visibleNotes = visibleProfileNotes(state, profileId);
+  const topVisibleNotes = [...visibleNotes].sort((a, b) => (b.liked_count ?? -1) - (a.liked_count ?? -1)).slice(0, 3);
+  return {
+    status: 'success',
+    type: 'blogger_profile',
+    original_url: originalUrl,
+    final_url: finalUrl,
+    profile_id: profileId,
+    note_id: '',
+    data: {
+      user_id: profileId,
+      canonical_profile_url: canonicalProfileUrl(finalUrl),
+      nickname: first(basic.nickname, basic.nickName) || '',
+      red_id: first(basic.redId, basic.red_id) || '',
+      description: first(basic.desc, basic.description) || '',
+      avatar_url: first(basic.imageb, basic.images, basic.avatar) || '',
+      following_count: interactionCount(page.interactions, 'follows'),
+      follower_count: interactionCount(page.interactions, 'fans'),
+      total_likes_collects: interactionCount(page.interactions, 'interaction'),
+      visible_note_count: visibleNotes.length,
+      visible_notes: visibleNotes,
+      top_visible_notes: topVisibleNotes,
+    },
+    analysis: {},
+  };
+}
+
 export function normalizeNote(note, { originalUrl, finalUrl, noteId, transcript = '', subtitleUrl = '' }) {
   const media = parseMediaV2(first(note.mediaV2, note.media_v2, note.video?.mediaV2, note.video?.media_v2));
   const imageUrls = images(note);
@@ -184,7 +267,8 @@ export function normalizeNote(note, { originalUrl, finalUrl, noteId, transcript 
     data: {
       title: first(note.title, note.displayTitle) || '',
       description: first(note.desc, note.description) || '',
-      author: first(note.user?.nickname, note.user?.name, note.author?.nickname, note.nickname) || '',
+      author: first(note.user?.nickname, note.user?.nickName, note.user?.name, note.author?.nickname, note.nickname) || '',
+      author_id: String(first(note.user?.userId, note.user?.user_id, note.author?.userId, note.author?.user_id) || ''),
       topics: topicNames(note),
       cover_url: imageUrls[0] || firstUrl(note.cover) || firstUrl(note.video?.image) || firstUrl(media),
       image_urls: imageUrls,
@@ -224,8 +308,11 @@ export async function extractOne(originalUrl, fetchImpl = fetch) {
   try {
     const page = await fetchPage(originalUrl, fetchImpl);
     finalUrl = page.finalUrl;
-    const noteId = noteIdFromUrl(finalUrl);
     const state = parseInitialState(page.html);
+    if (profileIdFromUrl(finalUrl)) {
+      return normalizeBloggerProfile(state, { originalUrl, finalUrl });
+    }
+    const noteId = noteIdFromUrl(finalUrl);
     const note = findNoteObject(state, noteId);
     const media = parseMediaV2(first(note.mediaV2, note.media_v2, note.video?.mediaV2, note.video?.media_v2));
     const subtitleUrl = findSubtitleUrl(media);

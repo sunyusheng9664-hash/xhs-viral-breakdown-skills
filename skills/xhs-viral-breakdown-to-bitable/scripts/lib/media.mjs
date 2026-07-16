@@ -15,9 +15,11 @@ function extension(contentType, url) {
 
 export async function downloadFreshMedia(item, outputDir, fetchImpl = fetch) {
   fs.mkdirSync(outputDir, { recursive: true });
-  const urls = item.type === 'video'
-    ? [item.data?.cover_url].filter(Boolean)
-    : (item.data?.image_urls || []).filter(Boolean);
+  const urls = item.type === 'blogger_profile'
+    ? [item.data?.avatar_url].filter(Boolean)
+    : item.type === 'video'
+      ? [item.data?.cover_url].filter(Boolean)
+      : (item.data?.image_urls || []).filter(Boolean);
   const files = [];
   const errors = [];
   for (let index = 0; index < urls.length; index += 1) {
@@ -29,7 +31,11 @@ export async function downloadFreshMedia(item, outputDir, fetchImpl = fetch) {
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const ext = extension(response.headers?.get?.('content-type'), url);
-      const name = item.type === 'video' ? `01_封面${ext}` : `${String(index + 1).padStart(2, '0')}${index === 0 ? '_封面' : ''}${ext}`;
+      const name = item.type === 'blogger_profile'
+        ? `01_头像${ext}`
+        : item.type === 'video'
+          ? `01_封面${ext}`
+          : `${String(index + 1).padStart(2, '0')}${index === 0 ? '_封面' : ''}${ext}`;
       const file = path.join(outputDir, name);
       fs.writeFileSync(file, Buffer.from(await response.arrayBuffer()));
       files.push(file);
